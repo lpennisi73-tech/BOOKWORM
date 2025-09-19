@@ -130,7 +130,7 @@ detect_jobs() {
 pre_kernel_action() {
   local action="$1"
   info "Préparation sécurité avant ${action}..."
-
+  
   if command -v vzdump >/dev/null 2>&1; then
     run_cmd vzdump "<VMID>" --dumpdir /backup --mode snapshot
   elif command -v zfs >/dev/null 2>&1; then
@@ -140,33 +140,64 @@ pre_kernel_action() {
   else
     local backup_file="${ARCHIVE_DIR}/pre-kernel-backup-$(date +%F-%H%M).tar.gz"
     info "Création d'une sauvegarde tar dans ${backup_file}"
-
+    
     # Créer le répertoire archive s'il n'existe pas
     mkdir -p "${ARCHIVE_DIR}"
-
-    # Utiliser des chemins relatifs et exclure les liens symboliques problématiques
-    run_cmd tar --exclude='lost+found' --exclude='*.tmp' --exclude='*.temp' \
-        -czf "${backup_file}" \
-        -C / \
-        --exclude='boot/lost+found' \
-        boot/config-* boot/System.map-* boot/vmlinuz-* boot/initrd.img-* boot/grub/grub.cfg \
-        lib/modules 2>/dev/null || {
-      warn "Sauvegarde tar partielle - certains fichiers ignorés"
-      # Essayer une sauvegarde minimale des configs seulement
-      run_cmd tar -czf "${backup_file}" -C / boot/config-* boot/System.map-* 2>/dev/null || {
-        warn "Impossible de créer la sauvegarde - continuons sans backup"
-        return 0
-      }
-    }
-
-    if [[ -f "${backup_file}" ]]; then
-      local backup_size=$(du -h "${backup_file}" | cut -f1)
-      ok "Sauvegarde créée : ${backup_file} (${backup_size})"
-    else
-      warn "Fichier de sauvegarde non créé - continuons sans backup"
+    
+    # Méthode progressive : essayer plusieurs niveaux de sauvegarde
+    local backup_created=false
+    
+    # Tentative 1 : Sauvegarde complète avec gestion d'erreurs améliorée
+    if [[ "$backup_created" == "false" ]]; then
+      info "Tentative de sauvegarde complète..."
+      if tar --warning=no-file-removed --warning=no-file-changed \
+         --exclude='lost+found' --exclude='*.tmp' --exclude='*.temp' \
+         -czf "${backup_file}" \
+         -C / \
+         boot/config-* boot/System.map-* boot/vmlinuz-* boot/initrd.img-* \
+         lib/modules 2>/dev/null; then
+        backup_created=true
+        local backup_size=$(du -h "${backup_file}" 2>/dev/null | cut -f1)
+        ok "Sauvegarde complète créée : ${backup_file} (${backup_size})"
+      fi
+    fi
+    
+    # Tentative 2 : Sauvegarde minimale des configs
+    if [[ "$backup_created" == "false" ]]; then
+      info "Tentative de sauvegarde minimale (configs seulement)..."
+      if tar -czf "${backup_file}" -C / boot/config-* boot/System.map-* 2>/dev/null; then
+        backup_created=true
+        local backup_size=$(du -h "${backup_file}" 2>/dev/null | cut -f1)
+        warn "Sauvegarde partielle créée : ${backup_file} (${backup_size})"
+        info "Seuls les fichiers de configuration ont été sauvegardés"
+      fi
+    fi
+    
+    # Tentative 3 : Sauvegarde symbolique
+    if [[ "$backup_created" == "false" ]]; then
+      info "Création d'une liste des fichiers critiques..."
+      {
+        echo "# Backup symbolique - $(date)"
+        echo "# Kernel actuel: $(uname -r)"
+        ls -la /boot/config-* /boot/System.map-* /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
+        ls -la /lib/modules/ 2>/dev/null || true
+      } > "${backup_file%.tar.gz}.txt"
+      backup_created=true
+      warn "Sauvegarde symbolique créée : ${backup_file%.tar.gz}.txt"
+      info "Liste des fichiers critiques sauvegardée pour référence"
+    fi
+    
+    if [[ "$backup_created" == "false" ]]; then
+      warn "Impossible de créer une sauvegarde - opération risquée"
+      echo -ne "${YELLOW}Continuer sans sauvegarde ? (oui/non): ${RESET}"
+      read -r continue_without_backup
+      if [[ "$continue_without_backup" != "oui" ]]; then
+        warn "Opération annulée par l'utilisateur"
+        return 1
+      fi
     fi
   fi
-
+  
   ok "Préparation sécurité terminée"
 }
 
@@ -176,31 +207,54 @@ pre_kernel_action() {
 list_installed_kernels() {
   info "Kernels installés"
   local current; current="$(uname -r)"
-  dpkg -l | awk '/linux-image-[0-9]/{print $2"\t"$3}' | while IFS=$'\t' read -r pkg ver; do
+  
+  # Lister seulement les paquets complètement installés (statut "ii")
+  dpkg -l | awk '/^ii.*linux-image-[0-9]/{print $2"\t"$3}' | while IFS=$'\t' read -r pkg ver; do
     local mark=" "
     [[ "${current}" == *"${pkg#linux-image-}"* ]] && mark="*"
     printf "%s  %-45s %-20s\n" "${mark}" "${pkg}" "${ver}" | tee -a "${LOG_FILE}"
   done
+  
+  # Afficher les paquets partiellement supprimés séparément (optionnel pour info)
+  local partial_removed
+  partial_removed=$(dpkg -l | awk '/^rc.*linux-image-[0-9]/{print $2}' | wc -l)
+  if [[ $partial_removed -gt 0 ]]; then
+    echo
+    warn "Paquets partiellement supprimés (configs restantes) : ${partial_removed}"
+    info "Utilisez 'sudo apt purge <nom-paquet>' pour les supprimer complètement"
+  fi
 }
 
 remove_installed_kernel() {
   list_installed_kernels
   echo -ne "${BOLD}Nom exact du paquet: ${RESET}"; read -r pkg
-  local current; current="$(uname -r)"
-
-  if [[ "${current}" == *"${pkg#linux-image-}"* ]]; then
-    warn "Impossible: kernel actif"
+  
+  # Vérification que le paquet existe et est installé (plus flexible)
+  if ! dpkg -l "${pkg}" 2>/dev/null | grep -q "^ii"; then
+    warn "Paquet '${pkg}' non trouvé ou non installé"
     read -rp "Entrée pour revenir..." _
     return 0
   fi
-
+  
+  local current; current="$(uname -r)"
+  
+  # Protection renforcée contre la suppression du kernel actif
+  if [[ "${current}" == *"${pkg#linux-image-}"* ]]; then
+    err "IMPOSSIBLE: Vous essayez de supprimer le kernel actuellement en cours d'exécution !"
+    warn "Kernel actif: ${current}"
+    warn "Paquet demandé: ${pkg}"
+    warn "Redémarrez sur un autre kernel avant de supprimer celui-ci"
+    read -rp "Entrée pour revenir..." _
+    return 0
+  fi
+  
   # Extraire la version du kernel pour chercher les headers correspondants
   local kernel_version="${pkg#linux-image-}"
   local headers_pkg="linux-headers-${kernel_version}"
-
+  
   # Vérifier si les headers correspondants sont installés
   local packages_to_remove=("$pkg")
-  if dpkg -l | grep -q "^ii.*${headers_pkg}[[:space:]]"; then
+  if dpkg -l "${headers_pkg}" 2>/dev/null | grep -q "^ii"; then
     ok "Headers correspondants trouvés: ${headers_pkg}"
     echo -ne "${YELLOW}Supprimer aussi les headers correspondants ? (O/n): ${RESET}"
     read -r remove_headers
@@ -216,25 +270,38 @@ remove_installed_kernel() {
   else
     info "Aucun headers correspondant installé"
   fi
-
+  
+  # Choix du type de suppression
+  echo
+  echo -ne "${YELLOW}Suppression complète (purge) ou partielle (remove) ? (p/r): ${RESET}"
+  read -r purge_choice
+  local action_cmd
+  if [[ "${purge_choice,,}" == "p" ]]; then
+    action_cmd="purge"
+    info "Suppression complète sélectionnée (binaires + configurations)"
+  else
+    action_cmd="remove"
+    info "Suppression partielle sélectionnée (binaires seulement)"
+  fi
+  
   # Affichage récapitulatif
   echo
-  info "Paquets à supprimer :"
+  info "Paquets à supprimer (${action_cmd}) :"
   for pkg_remove in "${packages_to_remove[@]}"; do
     echo "  - $pkg_remove"
   done
   echo
-
+  
   pre_kernel_action "suppression"
   echo -ne "${YELLOW}Confirmer suppression (oui/non): ${RESET}"; read -r ans
   [[ "$ans" == "oui" ]] || { warn "Annulé"; read -rp "Entrée..." _; return; }
-
+  
   # Suppression des paquets
   for pkg_remove in "${packages_to_remove[@]}"; do
-    info "Suppression de ${pkg_remove}..."
-    run_cmd sudo apt remove -y "${pkg_remove}"
+    info "Suppression (${action_cmd}) de ${pkg_remove}..."
+    run_cmd sudo apt "${action_cmd}" -y "${pkg_remove}"
   done
-
+  
   run_cmd sudo apt autoremove -y
   ok "Suppression effectuée"
   if [[ ${#packages_to_remove[@]} -gt 1 ]]; then
@@ -242,7 +309,7 @@ remove_installed_kernel() {
   else
     info "Paquet supprimé: kernel image uniquement"
   fi
-
+  
   read -rp "Entrée pour revenir..." _
 }
 
