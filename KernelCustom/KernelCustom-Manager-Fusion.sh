@@ -618,6 +618,24 @@ choose_config_template() {
   read -rp "Entrée pour revenir..." _
 }
 
+# Fonction de validation du suffixe
+validate_suffix() {
+  local suffix="$1"
+  
+  # Vérifier que le suffixe respecte les conventions Debian
+  if [[ -n "$suffix" ]] && [[ ! "$suffix" =~ ^-[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    err "Suffixe invalide : '$suffix'"
+    warn "Le suffixe doit :"
+    warn "- Commencer par un tiret (-)"
+    warn "- Contenir uniquement des lettres minuscules, chiffres et tirets"
+    warn "- Ne pas se terminer par un tiret"
+    warn "Exemples valides : -custom, -lab, -prod, -test123"
+    warn "Exemples invalides : Custom, -Custom, -test-, test"
+    return 1
+  fi
+  return 0
+}
+
 launch_build() {
   # Désactiver set -e pour éviter les sorties prématurées
   set +e
@@ -637,9 +655,24 @@ launch_build() {
   pre_checks || return 1
   detect_jobs
 
-  # Demande du suffixe et méthode de compilation
+  # Demande du suffixe avec validation
+while true; do
   echo -ne "${BOLD}Entrez un suffixe pour les paquets (ex: -lab, -custom, vide pour aucun) : ${RESET}"
   read -r suffix
+
+  # Validation du suffixe
+  if validate_suffix "$suffix"; then
+    break
+  else
+    echo -ne "${YELLOW}Voulez-vous ressaisir le suffixe ? (o/n): ${RESET}"
+    read -r retry
+    if [[ "${retry,,}" != "o" && "${retry,,}" != "oui" ]]; then
+      warn "Compilation annulée"
+      read -rp "Entrée pour revenir..." _
+      return 0
+    fi
+  fi
+done
 
   echo -ne "${BOLD}Méthode de compilation [1=bindeb-pkg, 2=deb-pkg] (Entrée=1) : ${RESET}"
   read -r build_method
