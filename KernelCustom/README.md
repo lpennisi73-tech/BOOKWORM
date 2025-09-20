@@ -157,7 +157,11 @@ Développé pour démocratiser la compilation de kernels Linux et rendre accessi
 
 ## 📺 Démonstration
 
-[![Regarder la vidéo](https://img.youtube.com/vi/8RhV0l9NHaw/maxresdefault.jpg)](https://youtu.be/8RhV0l9NHaw)
+## 🎥 Ma vidéo sur KernelCustom
+
+
+[![Regarder sur YouTube](https://img.youtube.com/vi/NCacsn1uFr0/0.jpg)](https://youtu.be/NCacsn1uFr0)
+
 
 ---
 
