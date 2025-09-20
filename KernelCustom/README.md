@@ -157,7 +157,7 @@ Développé pour démocratiser la compilation de kernels Linux et rendre accessi
 
 ## 📺 Démonstration
 
-[Lien vers la vidéo de démonstration] *(à ajouter après publication)*
+[![Regarder la vidéo](https://img.youtube.com/vi/8RhV0l9NHaw/maxresdefault.jpg)](https://youtu.be/8RhV0l9NHaw)
 
 ---
 
