@@ -498,130 +498,138 @@ choose_kernel_version() {
   read -rp "Entrée pour revenir..." _
 }
 
-choose_config_template() {
+ choose_config_template() {
   if [[ ! -d "${BASE_DIR}/linux" ]]; then
     warn "Pas de sources kernel. Lance d'abord 'Télécharger le kernel stable'."
     read -rp "Entrée pour revenir..." _
     return 1
   fi
 
-  box "Choisir la configuration du noyau"
+  while true; do
+    box "Choisir la configuration du noyau"
 
-  echo "1) Sélectionner un template KernelCustom"
-  echo "2) Partir de la configuration système actuelle"
-  echo "3) Charger une configuration sauvegardée"
-  echo "4) Annuler"
-  echo
-  read -rp "Votre choix : " choice
+    echo "1) Sélectionner un template KernelCustom"
+    echo "2) Partir de la configuration système actuelle"
+    echo "3) Charger une configuration sauvegardée"
+    echo "4) Annuler"
+    echo
+    read -rp "Votre choix : " choice
 
-  case "$choice" in
-    1)
-      mapfile -t templates < <(find "${TEMPLATE_DIR}" -maxdepth 1 -type f \( -name "*.config" -o -name "*.conf" \) | sort)
+    case "$choice" in
+      1)
+        # Lister tous les templates .config et .conf
+        mapfile -t templates < <(find "${TEMPLATE_DIR}" -maxdepth 1 -type f \( -name "*.config" -o -name "*.conf" \) | sort)
 
-      if [[ ${#templates[@]} -eq 0 ]]; then
-        warn "Aucun template trouvé dans ${TEMPLATE_DIR}"
+        if [[ ${#templates[@]} -eq 0 ]]; then
+          warn "Aucun template trouvé dans ${TEMPLATE_DIR}"
+          local running_kernel
+          running_kernel=$(uname -r)
+          local current_config="/boot/config-${running_kernel}"
+          if [[ -f "$current_config" ]]; then
+            info "Création d'un template par défaut depuis la config système actuelle (${running_kernel})"
+            cp "$current_config" "${TEMPLATE_DIR}/kernelcustom-default.config"
+            templates=("${TEMPLATE_DIR}/kernelcustom-default.config")
+          else
+            err "Impossible de créer un template : config système introuvable"
+            read -rp "Entrée pour revenir..." _
+            continue
+          fi
+        fi
+
+        echo "Templates disponibles :"
+        for i in "${!templates[@]}"; do
+          printf "%2d) %s\n" $((i+1)) "$(basename "${templates[$i]}")"
+        done
+
+        read -rp "Sélectionnez un template : " idx
+        if [[ -z "$idx" ]] || ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > ${#templates[@]} )); then
+          err "Choix invalide."
+          read -rp "Entrée pour revenir..." _
+          continue
+        fi
+
+        local template_path="${templates[$((idx-1))]}"
+        info "Copie du template sélectionné : $(basename "$template_path")"
+        run_cmd cp "$template_path" "${BASE_DIR}/linux/.config"
+        (cd "${BASE_DIR}/linux" && run_cmd make olddefconfig)
+        if [[ "${DRYRUN:-0}" -eq 0 ]]; then
+          (cd "${BASE_DIR}/linux" && make menuconfig)
+        else
+          info "[DRYRUN] make menuconfig ignoré"
+        fi
+        ok "Configuration terminée"
+        read -rp "Entrée pour revenir..." _
+        return 0
+        ;;
+      2)
         local running_kernel
         running_kernel=$(uname -r)
-        local debian_config="/boot/config-${running_kernel}"
-        if [[ -f "$debian_config" ]]; then
-          info "Création d'un template par défaut depuis la config Debian actuelle (${running_kernel})"
-          cp "$debian_config" "${TEMPLATE_DIR}/kernelcustom-default.config"
-          templates=("${TEMPLATE_DIR}/kernelcustom-default.config")
-        else
-          err "Impossible de créer un template : config Debian introuvable"
+        local current_config="/boot/config-${running_kernel}"
+
+        if [[ ! -f "$current_config" ]]; then
+          err "Fichier de configuration introuvable : $current_config"
           read -rp "Entrée pour revenir..." _
-          return 1
+          continue
         fi
-      fi
 
-      echo "Templates disponibles :"
-      for i in "${!templates[@]}"; do
-        printf "%2d) %s\n" $((i+1)) "$(basename "${templates[$i]}")"
-      done
+        info "Copie de la configuration système actuelle (${running_kernel})"
+        run_cmd cp "$current_config" "${BASE_DIR}/linux/.config"
 
-      read -rp "Sélectionnez un template : " idx
-      if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > ${#templates[@]} )); then
-        err "Choix invalide."
+        # Correction spécifique Ubuntu : désactiver les certificats Canonical
+        if grep -qi ubuntu /etc/os-release; then
+          info "Système Ubuntu détecté - adaptation de la configuration"
+          sed -i 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/' "${BASE_DIR}/linux/.config"
+          sed -i 's/CONFIG_SYSTEM_REVOCATION_KEYS=.*/CONFIG_SYSTEM_REVOCATION_KEYS=""/' "${BASE_DIR}/linux/.config"
+          warn "Certificats Canonical désactivés pour compatibilité avec sources kernel.org"
+        fi
+
+        info "Adaptation de la configuration à la nouvelle version"
+        (cd "${BASE_DIR}/linux" && run_cmd make olddefconfig)
+
+        info "Ouverture de menuconfig pour personnalisation"
+        if [[ "${DRYRUN:-0}" -eq 0 ]]; then
+          (cd "${BASE_DIR}/linux" && make menuconfig)
+        else
+          info "[DRYRUN] make menuconfig ignoré"
+        fi
+        ok "Configuration terminée"
         read -rp "Entrée pour revenir..." _
-        return 1
-      fi
-
-      local template_path="${templates[$((idx-1))]}"
-      info "Copie du template sélectionné : $(basename "$template_path")"
-      run_cmd cp "$template_path" "${BASE_DIR}/linux/.config"
-      (cd "${BASE_DIR}/linux" && run_cmd make olddefconfig)
-      if [[ "${DRYRUN:-0}" -eq 0 ]]; then
-        (cd "${BASE_DIR}/linux" && make menuconfig)
-      else
-        info "[DRYRUN] make menuconfig ignoré"
-      fi
-      ;;
-    2)
-      local running_kernel
-      running_kernel=$(uname -r)
-      local current_config="/boot/config-${running_kernel}"
-
-      if [[ ! -f "$current_config" ]]; then
-        err "Fichier de configuration introuvable : $current_config"
+        return 0
+        ;;
+      3)
+        read -rp "Chemin vers votre fichier .config ou .conf sauvegardé : " saved_config
+        if [[ ! -f "$saved_config" ]]; then
+          err "Fichier introuvable : $saved_config"
+          read -rp "Entrée pour revenir..." _
+          continue
+        fi
+        run_cmd cp "$saved_config" "${BASE_DIR}/linux/.config"
+        (cd "${BASE_DIR}/linux" && run_cmd make olddefconfig)
+        if [[ "${DRYRUN:-0}" -eq 0 ]]; then
+          (cd "${BASE_DIR}/linux" && make menuconfig)
+        else
+          info "[DRYRUN] make menuconfig ignoré"
+        fi
+        ok "Configuration terminée"
         read -rp "Entrée pour revenir..." _
-        return 1
-      fi
-
-      info "Copie de la configuration système actuelle (${running_kernel})"
-      run_cmd cp "$current_config" "${BASE_DIR}/linux/.config"
-
-      # Correction spécifique Ubuntu : désactiver les certificats Canonical
-      if grep -qi ubuntu /etc/os-release; then
-        info "Système Ubuntu détecté - adaptation de la configuration"
-        sed -i 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/' "${BASE_DIR}/linux/.config"
-        sed -i 's/CONFIG_SYSTEM_REVOCATION_KEYS=.*/CONFIG_SYSTEM_REVOCATION_KEYS=""/' "${BASE_DIR}/linux/.config"
-        warn "Certificats Canonical désactivés pour compatibilité avec sources kernel.org"
-      fi
-
-      info "Adaptation de la configuration à la nouvelle version"
-      (cd "${BASE_DIR}/linux" && run_cmd make olddefconfig)
-
-      info "Ouverture de menuconfig pour personnalisation"
-      if [[ "${DRYRUN:-0}" -eq 0 ]]; then
-        (cd "${BASE_DIR}/linux" && make menuconfig)
-      else
-        info "[DRYRUN] make menuconfig ignoré"
-      fi
-      ;;
-
-    3)
-      read -rp "Chemin vers votre fichier .config ou .conf sauvegardé : " saved_config
-      if [[ ! -f "$saved_config" ]]; then
-        err "Fichier introuvable : $saved_config"
-        read -rp "Entrée pour revenir..." _
-        return 1
-      fi
-      run_cmd cp "$saved_config" "${BASE_DIR}/linux/.config"
-      (cd "${BASE_DIR}/linux" && run_cmd make olddefconfig)
-      if [[ "${DRYRUN:-0}" -eq 0 ]]; then
-        (cd "${BASE_DIR}/linux" && make menuconfig)
-      else
-        info "[DRYRUN] make menuconfig ignoré"
-      fi
-      ;;
-    4)
-      warn "Annulé."
-      return 1
-      ;;
-    *)
-      warn "Choix invalide."
-      return 1
-      ;;
-  esac
-
-  ok "Configuration terminée"
-  read -rp "Entrée pour revenir..." _
+        return 0
+        ;;
+      4)
+        warn "Annulé."
+        return 0
+        ;;
+      *)
+        warn "Choix invalide."
+        continue
+        ;;
+    esac
+  done
 }
 
 # Fonction de validation du suffixe
 validate_suffix() {
   local suffix="$1"
-  
+
   # Vérifier que le suffixe respecte les conventions Debian
   if [[ -n "$suffix" ]] && [[ ! "$suffix" =~ ^-[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
     err "Suffixe invalide : '$suffix'"
