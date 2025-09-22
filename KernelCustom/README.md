@@ -147,7 +147,7 @@ Les contributions sont les bienvenues ! N'hésitez pas à :
 - Ajouter le support d'autres distributions
 - Améliorer la documentation
 
-## 📄 Licence
+## 📄 Licence 
 
 Ce projet est distribué sous licence libre pour encourager l'apprentissage et le partage dans la communauté GNU/Linux.
 
