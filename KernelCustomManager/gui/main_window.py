@@ -5,6 +5,7 @@ Fenêtre principale de l'application
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
+from pathlib import Path
 
 from core.kernel_manager import KernelManager
 from utils.dialogs import DialogHelper
@@ -21,11 +22,21 @@ class KernelManagerWindow(Gtk.Window):
         self.kernel_manager = KernelManager()
         self.dialogs = DialogHelper(self)
         
+        # Icône
+        try:
+            icon_path = Path(__file__).parent.parent / "icon.svg"
+            if icon_path.exists():
+                self.set_icon_from_file(str(icon_path))
+            else:
+                self.set_icon_name("system-software-update")
+        except:
+            pass
+        
         # Header Bar
         headerbar = Gtk.HeaderBar()
         headerbar.set_show_close_button(True)
         headerbar.props.title = "KernelCustom Manager"
-        headerbar.props.subtitle = "Édition Professionnelle v2.0"
+        headerbar.props.subtitle = "Édition Professionnelle v2.1"
         self.set_titlebar(headerbar)
         
         self.create_ui()
@@ -41,6 +52,7 @@ class KernelManagerWindow(Gtk.Window):
         from gui.build_tab import create_build_tab
         from gui.profiles_tab import create_profiles_tab
         from gui.history_tab import create_history_tab
+        from gui.sources_tab import create_sources_tab
         
         # Ajouter les onglets
         self.stack.add_titled(
@@ -59,6 +71,12 @@ class KernelManagerWindow(Gtk.Window):
             create_build_tab(self),
             "build",
             "Compiler"
+        )
+        
+        self.stack.add_titled(
+            create_sources_tab(self),
+            "sources",
+            "Sources système"
         )
         
         self.stack.add_titled(

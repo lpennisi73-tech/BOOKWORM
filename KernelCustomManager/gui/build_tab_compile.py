@@ -144,6 +144,7 @@ exit $RESULT
     
     terminals = [
         ["gnome-terminal", "--", "bash", "-c"],
+        ["ptyxis", "--", "bash", "-c"],
         ["konsole", "-e", "bash", "-c"],
         ["xterm", "-e", "bash", "-c"]
     ]

@@ -16,7 +16,7 @@ from gui.main_window import KernelManagerWindow
 def main():
     """Point d'entrée principal"""
     print("KernelCustom Manager - Version Python/GTK")
-    print("Édition Professionnelle v2.0")
+    print("Édition Professionnelle v2.1")
     print("=" * 50)
     
     # Initialiser les notifications

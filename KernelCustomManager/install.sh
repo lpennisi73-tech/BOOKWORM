@@ -5,7 +5,7 @@ set -e
 
 echo "=========================================="
 echo "  KernelCustom Manager - Installation"
-echo "  Édition Professionnelle v2.0"
+echo "  Édition Professionnelle v2.1"
 echo "=========================================="
 echo ""
 
@@ -31,6 +31,7 @@ case "$DISTRO" in
             python3 \
             python3-gi \
             gir1.2-gtk-3.0 \
+            gir1.2-gtk-4.0 \
             gir1.2-notify-0.7 \
             libnotify-bin \
             build-essential \

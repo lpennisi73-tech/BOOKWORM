@@ -1,7 +1,7 @@
 # KernelCustom Manager
 
 **Gestionnaire de compilation et installation de kernels Linux personnalisés**  
-*Édition Professionnelle v2.0*
+*Édition Professionnelle v2.1*
 
 ![Python](https://img.shields.io/badge/Python-3.6+-blue.svg)
 ![GTK](https://img.shields.io/badge/GTK-3.0-green.svg)
