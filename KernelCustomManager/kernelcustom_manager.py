@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 KernelCustom Manager - Version Python/GTK
-Édition Professionnelle v2.0
+Édition Professionnelle v2.2
 Point d'entrée principal
 """
 
@@ -16,7 +16,7 @@ from gui.main_window import KernelManagerWindow
 def main():
     """Point d'entrée principal"""
     print("KernelCustom Manager - Version Python/GTK")
-    print("Édition Professionnelle v2.1")
+    print("Édition Professionnelle v2.2")
     print("=" * 50)
     
     # Initialiser les notifications

@@ -1,0 +1,239 @@
+{
+  "window": {
+    "title": "KernelCustom Manager",
+    "subtitle": "Professional Edition v2.1"
+  },
+  "tab": {
+    "kernels": "Installed Kernels",
+    "packages": "Local Packages",
+    "build": "Compile",
+    "sources": "System Sources",
+    "profiles": "Profiles",
+    "history": "History"
+  },
+  "kernel": {
+    "active": "Active Kernel:",
+    "column_package": "Package",
+    "column_version": "Version",
+    "column_size": "Size"
+  },
+  "button": {
+    "refresh": "🔄 Refresh",
+    "remove": "🗑️ Remove",
+    "reboot": "🔄 Reboot",
+    "install": "📥 Install",
+    "download": "📥 Download",
+    "update": "🔄",
+    "configure": "⚙️ Configure",
+    "import": "📁 Import",
+    "export": "💾 Export",
+    "compile": "🔨 Compile Kernel",
+    "save": "💾 Save",
+    "load": "📂 Load",
+    "delete": "🗑️ Delete",
+    "clear": "🗑️ Clear",
+    "cancel": "Cancel"
+  },
+  "tooltip": {
+    "update_stable": "Update to the latest stable version"
+  },
+  "message": {
+    "error": {
+      "title": "Error",
+      "select_kernel": "Please select a kernel to remove",
+      "active_kernel": "Cannot remove the active kernel!\n\nActive kernel: {kernel}\n\nReboot to another kernel first.",
+      "select_package": "Please select a package to install",
+      "enter_version": "Please enter a version",
+      "no_kernel_source": "No kernel source found",
+      "download_failed": "Download failed",
+      "no_kernel_source_download": "No kernel source found\n\nDownload a kernel first",
+      "no_config": "No configuration found\n\nConfigure the kernel first",
+      "system_config_not_found": "System config not found:\n{path}",
+      "config_failed": "Configuration failed:\n{error}",
+      "select_config_file": "Select a .config file",
+      "load_failed": "Load failed:\n{error}",
+      "no_terminal": "No compatible terminal found",
+      "remove_failed": "Removal failed:\n{error}",
+      "reboot_failed": "Cannot reboot:\n{error}",
+      "install_failed": "Installation error",
+      "stable_version_failed": "Cannot retrieve stable version",
+      "import_failed": "Import failed",
+      "no_config_export": "No configuration to export",
+      "export_failed": "Export failed",
+      "profile_save_failed": "Cannot save profile",
+      "enter_name": "Please enter a name",
+      "select_profile": "Please select a profile",
+      "profile_load_failed": "Cannot load profile",
+      "profile_delete_failed": "Cannot delete:\n{error}",
+      "select_version": "Please select a version",
+      "invalid_version": "Invalid version"
+    },
+    "confirm": {
+      "title": "Confirm",
+      "delete_kernel": "The following packages will be removed:\n\n• {packages}\n\nThis action is irreversible!",
+      "reboot": "Do you really want to reboot the system now?\n\nMake sure you have saved your work.",
+      "update_available": "New version: {version}\n\nDownload?",
+      "load_profile": "Load profile '{name}'?\n\nThe current configuration will be replaced.",
+      "delete_profile": "Delete profile '{name}'?\n\nThis action is irreversible.",
+      "clear_history": "Clear all compilation history?\n\nThis action is irreversible.",
+      "create_link": "{description}\n\nCreate this symbolic link in /usr/src/?",
+      "copy_sources": "Copy kernel {version} sources to /usr/src/?\n\nThis will take ~1-2 GB of disk space.",
+      "delete_sources": "Remove kernel {version} sources from /usr/src/?\n\nThis action is irreversible!"
+    },
+    "success": {
+      "title": "Success",
+      "kernel_deleted": "Kernel and associated packages removed:\n\n• {packages}",
+      "kernel_downloaded": "Kernel {version} downloaded!",
+      "already_updated": "You already have the latest version: {version}",
+      "config_imported": "Configuration imported",
+      "config_exported": "Configuration exported",
+      "config_applied": "System configuration applied!",
+      "config_loaded": "Configuration loaded from:\n{path}",
+      "profile_saved": "Profile '{name}' saved!",
+      "profile_loaded": "Profile '{name}' loaded!",
+      "profile_deleted": "Profile '{name}' deleted",
+      "history_cleared": "History cleared",
+      "link_created": "Symbolic link successfully created in /usr/src/\n\n✓ DKMS will be able to compile for: {version}",
+      "link_created_simple": "Symbolic link successfully created in /usr/src/",
+      "sources_copied": "Kernel {version} sources copied to /usr/src/",
+      "sources_deleted": "Kernel {version} sources removed",
+      "packages_installed": "Packages installed:\n\n• {packages}\n\n🔄 Reboot your system to use the new kernel.",
+      "compilation_success": "Compilation successful!",
+      "compilation_success_notification": "Kernel {version}{suffix} compiled in {time}"
+    },
+    "info": {
+      "title": "Installing:",
+      "cancelled": "Download cancelled",
+      "already_uptodate": "Already up to date",
+      "compilation_launched": "Compilation is running in terminal\n\nThreads: {threads}\nSuffix: {suffix}\nLog: {log}"
+    }
+  },
+  "dialog": {
+    "install_options": {
+      "title": "Installation Options",
+      "install_headers": "Also install headers",
+      "install_headers_unavailable": "Also install headers (not available)"
+    },
+    "download": {
+      "title": "Kernel Download",
+      "status": "Downloading kernel {version}..."
+    },
+    "remove_kernel": {
+      "title": "Kernel Removal",
+      "status": "Removing packages...",
+      "status_count": "Removing {count} package(s)...",
+      "cleanup": "Cleaning up..."
+    },
+    "install_kernel": {
+      "title": "Kernel Installation",
+      "preparing": "Preparing installation...",
+      "installing": "Installing {package}...",
+      "resolving_deps": "Resolving dependencies..."
+    },
+    "configure": {
+      "title": "Kernel Configuration",
+      "choose_method": "Choose a configuration method:",
+      "system_config": "Current system config",
+      "file_config": "Load a .config file",
+      "run_menuconfig": "Run menuconfig afterwards",
+      "button_configure": "Configure"
+    },
+    "compile": {
+      "title": "Compilation Options",
+      "threads": "Number of threads:",
+      "suffix": "Suffix (optional):",
+      "suffix_placeholder": "-custom",
+      "use_fakeroot": "Use fakeroot (recommended)",
+      "estimated_time": "Estimated time: 30-90 minutes",
+      "button_compile": "🔨 Compile"
+    },
+    "import_config": {
+      "title": "Import Configuration",
+      "filter_name": "Config files"
+    },
+    "export_config": {
+      "title": "Export Configuration"
+    },
+    "save_profile": {
+      "title": "Save Profile",
+      "name": "Profile name:",
+      "name_placeholder": "e.g.: gaming, server, desktop",
+      "description": "Description:",
+      "description_placeholder": "Optional",
+      "button_save": "💾 Save"
+    },
+    "suffix_dkms": {
+      "title": "DKMS Suffix",
+      "base_version": "Base version: {version}",
+      "info": "Enter the full version with suffix\n(must match installed headers)",
+      "full_version": "Full version:",
+      "button_create": "Create link"
+    },
+    "link_sources": {
+      "title": "Creating Link",
+      "status": "Creating link..."
+    },
+    "copy_sources": {
+      "title": "Copying Sources",
+      "status": "Copying..."
+    },
+    "delete_sources": {
+      "title": "Removal",
+      "status": "Removing..."
+    }
+  },
+  "compilation": {
+    "header": "=== KERNEL COMPILATION ===",
+    "threads": "Threads: {count}",
+    "suffix": "Suffix: {suffix}",
+    "suffix_none": "none",
+    "fakeroot": "Fakeroot: {status}",
+    "fakeroot_yes": "yes",
+    "fakeroot_no": "no",
+    "starting": "Compilation will start...",
+    "success": "✅ COMPILATION SUCCESSFUL!",
+    "moving_packages": "Moving packages...",
+    "package_moved": "✓ {name} moved",
+    "failed": "❌ COMPILATION FAILED!",
+    "return_code": "Return code: {code}",
+    "press_enter": "Press Enter to close...",
+    "failed_notification": "Error during kernel {version}{suffix} compilation"
+  },
+  "profiles": {
+    "title": "Configuration Profiles",
+    "subtitle": "Save and reuse your configurations",
+    "column_name": "Name",
+    "column_description": "Description",
+    "column_date": "Date"
+  },
+  "history": {
+    "title": "Compilation History",
+    "column_date": "Date",
+    "column_version": "Version",
+    "column_suffix": "Suffix",
+    "column_duration": "Duration",
+    "column_status": "Status",
+    "status_success": "✅ Success",
+    "status_failed": "❌ Failed"
+  },
+  "sources": {
+    "title": "Managing sources in /usr/src/",
+    "subtitle": "Install or remove system kernel sources",
+    "available": "Available Sources",
+    "available_subtitle": "(KernelCustom Manager)",
+    "installed": "Installed Sources",
+    "installed_subtitle": "(/usr/src/)",
+    "column_version": "Version",
+    "column_active": "Active Link",
+    "button_copy": "📥 Copy to /usr/src/",
+    "button_link_simple": "🔗 Simple symbolic link",
+    "button_link_suffix": "🔗 Link with suffix (DKMS)"
+  },
+  "build": {
+    "version_label": "Kernel version:"
+  },
+  "misc": {
+    "impossible": "Impossible",
+    "menuconfig_prompt": "Press Enter..."
+  }
+}

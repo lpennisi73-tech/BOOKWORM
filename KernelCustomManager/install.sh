@@ -5,7 +5,7 @@ set -e
 
 echo "=========================================="
 echo "  KernelCustom Manager - Installation"
-echo "  Édition Professionnelle v2.1"
+echo "  Édition Professionnelle v2.2"
 echo "=========================================="
 echo ""
 
@@ -88,6 +88,23 @@ echo ""
 # Rendre le script principal exécutable
 chmod +x kernelcustom_manager.py 2>/dev/null || true
 chmod +x manage_kernel_sources.sh 2>/dev/null || true
+chmod +x kernelcustom-helper 2>/dev/null || true
+
+# Installer PolicyKit et le helper
+echo "🔐 Installation du helper PolicyKit..."
+if sudo cp kernelcustom-helper /usr/local/bin/kernelcustom-helper 2>/dev/null; then
+    sudo chmod +x /usr/local/bin/kernelcustom-helper
+    echo "   ✓ Helper installé dans /usr/local/bin/"
+fi
+
+if sudo cp com.kernelcustom.manager.policy /usr/share/polkit-1/actions/ 2>/dev/null; then
+    echo "   ✓ Règles PolicyKit installées"
+    echo "   ✓ Le mot de passe ne sera demandé qu'une fois toutes les 5 minutes !"
+else
+    echo "   ⚠️  Impossible d'installer les règles PolicyKit (sudo requis)"
+    echo "      L'application fonctionnera mais demandera le mot de passe plus souvent"
+fi
+
 # Créer le lanceur d'application
 echo "🖼️  Installation du lanceur d'application..."
 INSTALL_DIR="$(pwd)"

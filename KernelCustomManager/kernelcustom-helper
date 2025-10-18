@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# KernelCustom Manager Helper Script
+# This script performs privileged operations with PolicyKit authentication
+#
+
+set -e
+
+ACTION="$1"
+shift
+
+case "$ACTION" in
+    install-packages)
+        # Install kernel packages
+        dpkg -i "$@"
+        apt-get install -f -y
+        ;;
+
+    remove-packages)
+        # Remove kernel packages
+        apt purge -y "$@"
+        apt autoremove -y
+        ;;
+
+    reboot)
+        # Reboot system
+        systemctl reboot
+        ;;
+
+    copy-sources)
+        # Copy kernel sources to /usr/src/
+        SOURCE="$1"
+        DEST="$2"
+        cp -r "$SOURCE" "$DEST"
+        ;;
+
+    create-link)
+        # Create symbolic link in /usr/src/
+        TARGET="$1"
+        LINK="$2"
+        ln -sf "$TARGET" "$LINK"
+        ;;
+
+    remove-sources)
+        # Remove kernel sources from /usr/src/
+        rm -rf "$1"
+        ;;
+
+    *)
+        echo "Unknown action: $ACTION" >&2
+        echo "Usage: $0 {install-packages|remove-packages|reboot|copy-sources|create-link|remove-sources} [args...]" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

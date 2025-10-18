@@ -8,18 +8,21 @@ from gi.repository import Gtk, GLib
 import subprocess
 import threading
 from pathlib import Path
+from utils.i18n import get_i18n
+from utils.pkexec_helper import PkexecHelper
 
 
 def create_kernels_tab(main_window):
     """Crée l'onglet de gestion des kernels"""
-    
+    i18n = get_i18n()
+
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    
+
     # Info kernel actuel
     import platform
     current_kernel = platform.release()
     info_label = Gtk.Label()
-    info_label.set_markup(f"<b>Kernel actif :</b> <span color='green'>{current_kernel}</span>")
+    info_label.set_markup(f"<b>{i18n._('kernel.active')}</b> <span color='green'>{current_kernel}</span>")
     info_label.set_halign(Gtk.Align.START)
     box.pack_start(info_label, False, False, 5)
     
@@ -35,8 +38,8 @@ def create_kernels_tab(main_window):
     column = Gtk.TreeViewColumn("", renderer, text=0)
     column.set_min_width(30)
     kernels_view.append_column(column)
-    
-    for i, title in enumerate(["Paquet", "Version"], 1):
+
+    for i, title in enumerate([i18n._("kernel.column_package"), i18n._("kernel.column_version")], 1):
         renderer = Gtk.CellRendererText()
         column = Gtk.TreeViewColumn(title, renderer, text=i)
         column.set_resizable(True)
@@ -47,16 +50,16 @@ def create_kernels_tab(main_window):
     
     # Boutons
     btn_box = Gtk.Box(spacing=5)
-    
-    refresh_btn = Gtk.Button(label="🔄 Actualiser")
+
+    refresh_btn = Gtk.Button(label=i18n._("button.refresh"))
     refresh_btn.connect("clicked", lambda w: refresh_kernels(main_window, kernels_store))
     btn_box.pack_start(refresh_btn, False, False, 0)
-    
-    remove_btn = Gtk.Button(label="🗑️ Supprimer")
+
+    remove_btn = Gtk.Button(label=i18n._("button.remove"))
     remove_btn.connect("clicked", lambda w: remove_kernel(main_window, kernels_view, kernels_store))
     btn_box.pack_start(remove_btn, False, False, 0)
-    
-    reboot_btn = Gtk.Button(label="🔄 Redémarrer")
+
+    reboot_btn = Gtk.Button(label=i18n._("button.reboot"))
     reboot_btn.connect("clicked", lambda w: reboot_system(main_window))
     btn_box.pack_start(reboot_btn, False, False, 0)
     
@@ -82,24 +85,23 @@ def refresh_kernels(main_window, store):
 
 def remove_kernel(main_window, view, store):
     """Supprime un kernel sélectionné"""
+    i18n = get_i18n()
     selection = view.get_selection()
     model, treeiter = selection.get_selected()
-    
+
     if not treeiter:
-        main_window.dialogs.show_error("Erreur", "Veuillez sélectionner un kernel à supprimer")
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.select_kernel"))
         return
-    
+
     mark = model[treeiter][0]
     package = model[treeiter][1]
-    
+
     if mark == "✓":
         import platform
         current = platform.release()
         main_window.dialogs.show_error(
-            "Impossible",
-            f"Impossible de supprimer le kernel actif !\n\n"
-            f"Kernel actif: {current}\n\n"
-            f"Redémarrez sur un autre kernel avant."
+            i18n._("misc.impossible"),
+            i18n._("message.error.active_kernel", kernel=current)
         )
         return
     
@@ -126,30 +128,30 @@ def remove_kernel(main_window, view, store):
         related_packages = [package]
     
     packages_list = "\n• ".join(related_packages)
-    
+
     if not main_window.dialogs.show_question(
-        "Confirmer la suppression",
-        f"Les paquets suivants seront supprimés :\n\n• {packages_list}\n\nCette action est irréversible !"
+        i18n._("message.confirm.title"),
+        i18n._("message.confirm.delete_kernel", packages=packages_list)
     ):
         return
-    
+
     # Dialogue de progression
     dialog = Gtk.Dialog(
-        title="Suppression du kernel",
+        title=i18n._("dialog.remove_kernel.title"),
         transient_for=main_window,
         flags=0
     )
     dialog.set_default_size(500, 150)
-    
+
     content = dialog.get_content_area()
     content.set_spacing(10)
     content.set_margin_start(20)
     content.set_margin_end(20)
     content.set_margin_top(10)
     content.set_margin_bottom(10)
-    
+
     status_label = Gtk.Label()
-    status_label.set_text("Suppression des paquets...")
+    status_label.set_text(i18n._("dialog.remove_kernel.status"))
     content.pack_start(status_label, False, False, 0)
     
     progress = Gtk.ProgressBar()
@@ -160,43 +162,46 @@ def remove_kernel(main_window, view, store):
     
     def remove_thread():
         try:
-            GLib.idle_add(lambda: status_label.set_text(f"Suppression de {len(related_packages)} paquet(s)..."))
+            GLib.idle_add(lambda: status_label.set_text(i18n._("dialog.remove_kernel.status_count", count=len(related_packages))))
             GLib.idle_add(lambda: progress.set_fraction(0.5))
             GLib.idle_add(lambda: progress.set_text("50%"))
-            
-            subprocess.run(
-                ["pkexec", "apt", "purge", "-y"] + related_packages,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            GLib.idle_add(lambda: status_label.set_text("Nettoyage..."))
-            GLib.idle_add(lambda: progress.set_fraction(0.9))
-            GLib.idle_add(lambda: progress.set_text("90%"))
-            
-            subprocess.run(
-                ["pkexec", "apt", "autoremove", "-y"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
+
+            # Use PolicyKit helper - only asks for password once
+            if PkexecHelper.is_helper_installed():
+                success, stdout, stderr = PkexecHelper.remove_packages(*related_packages)
+                if not success:
+                    raise Exception(f"Removal failed: {stderr}")
+            else:
+                # Fallback to old method if helper not installed
+                subprocess.run(
+                    ["pkexec", "apt", "purge", "-y"] + related_packages,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+
+                subprocess.run(
+                    ["pkexec", "apt", "autoremove", "-y"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+
             GLib.idle_add(lambda: progress.set_fraction(1.0))
             GLib.idle_add(lambda: progress.set_text("100%"))
             GLib.idle_add(dialog.destroy)
-            
+
             GLib.idle_add(
                 main_window.dialogs.show_info,
-                "✅ Suppression réussie",
-                f"Kernel et paquets associés supprimés :\n\n• {packages_list}"
+                i18n._("message.success.title"),
+                i18n._("message.success.kernel_deleted", packages=packages_list)
             )
-            
+
             GLib.idle_add(lambda: refresh_kernels(main_window, store))
-            
+
         except Exception as e:
             GLib.idle_add(dialog.destroy)
-            GLib.idle_add(main_window.dialogs.show_error, "❌ Erreur", f"Échec de la suppression:\n{e}")
+            GLib.idle_add(main_window.dialogs.show_error, i18n._("message.error.title"), i18n._("message.error.remove_failed", error=str(e)))
     
     thread = threading.Thread(target=remove_thread, daemon=True)
     thread.start()
@@ -204,12 +209,19 @@ def remove_kernel(main_window, view, store):
 
 def reboot_system(main_window):
     """Redémarre le système"""
+    i18n = get_i18n()
     if main_window.dialogs.show_question(
-        "Confirmer le redémarrage",
-        "Voulez-vous vraiment redémarrer le système maintenant ?\n\n"
-        "Assurez-vous d'avoir sauvegardé votre travail."
+        i18n._("message.confirm.title"),
+        i18n._("message.confirm.reboot")
     ):
         try:
-            subprocess.run(["pkexec", "systemctl", "reboot"], check=True)
+            # Use PolicyKit helper - only asks for password once
+            if PkexecHelper.is_helper_installed():
+                success, stdout, stderr = PkexecHelper.reboot()
+                if not success:
+                    raise Exception(f"Reboot failed: {stderr}")
+            else:
+                # Fallback to old method if helper not installed
+                subprocess.run(["pkexec", "systemctl", "reboot"], check=True)
         except Exception as e:
-            main_window.dialogs.show_error("Erreur", f"Impossible de redémarrer:\n{e}")
+            main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.reboot_failed", error=str(e)))

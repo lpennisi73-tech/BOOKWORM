@@ -9,22 +9,24 @@ import subprocess
 import threading
 import os
 from datetime import datetime
+from utils.i18n import get_i18n
 
 
 def show_compile_dialog(main_window):
     """Dialogue de compilation"""
+    i18n = get_i18n()
     linux_dir = main_window.kernel_manager.base_dir / "linux"
-    
+
     if not linux_dir.exists():
-        main_window.dialogs.show_error("Erreur", "Aucune source kernel trouvée")
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_kernel_source"))
         return
-    
+
     if not (linux_dir / ".config").exists():
-        main_window.dialogs.show_error("Erreur", "Aucune configuration trouvée\n\nConfigurez d'abord le kernel")
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_config"))
         return
-    
+
     dialog = Gtk.Dialog(
-        title="Options de compilation",
+        title=i18n._("dialog.compile.title"),
         transient_for=main_window,
         flags=0
     )
@@ -39,38 +41,38 @@ def show_compile_dialog(main_window):
     
     # Threads
     threads_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-    threads_box.pack_start(Gtk.Label(label="Nombre de threads:"), False, False, 0)
-    
+    threads_box.pack_start(Gtk.Label(label=i18n._("dialog.compile.threads")), False, False, 0)
+
     threads_spin = Gtk.SpinButton()
     threads_spin.set_range(1, os.cpu_count() * 2)
     threads_spin.set_value(os.cpu_count())
     threads_spin.set_increments(1, 4)
     threads_box.pack_start(threads_spin, True, True, 0)
-    
+
     content.pack_start(threads_box, False, False, 0)
-    
+
     # Suffixe
     suffix_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-    suffix_box.pack_start(Gtk.Label(label="Suffixe (optionnel):"), False, False, 0)
-    
+    suffix_box.pack_start(Gtk.Label(label=i18n._("dialog.compile.suffix")), False, False, 0)
+
     suffix_entry = Gtk.Entry()
-    suffix_entry.set_placeholder_text("-custom")
+    suffix_entry.set_placeholder_text(i18n._("dialog.compile.suffix_placeholder"))
     suffix_box.pack_start(suffix_entry, True, True, 0)
-    
+
     content.pack_start(suffix_box, False, False, 0)
-    
+
     # Fakeroot
-    fakeroot_check = Gtk.CheckButton(label="Utiliser fakeroot (recommandé)")
+    fakeroot_check = Gtk.CheckButton(label=i18n._("dialog.compile.use_fakeroot"))
     fakeroot_check.set_active(True)
     content.pack_start(fakeroot_check, False, False, 0)
-    
+
     # Info
     info_label = Gtk.Label()
-    info_label.set_markup("<i>Durée estimée: 30-90 minutes</i>")
+    info_label.set_markup(f"<i>{i18n._('dialog.compile.estimated_time')}</i>")
     content.pack_start(info_label, False, False, 0)
-    
-    dialog.add_button("Annuler", Gtk.ResponseType.CANCEL)
-    dialog.add_button("🔨 Compiler", Gtk.ResponseType.OK)
+
+    dialog.add_button(i18n._("button.cancel"), Gtk.ResponseType.CANCEL)
+    dialog.add_button(i18n._("dialog.compile.button_compile"), Gtk.ResponseType.OK)
     
     dialog.show_all()
     response = dialog.run()
@@ -88,32 +90,33 @@ def show_compile_dialog(main_window):
 
 def compile_kernel(main_window, jobs, suffix, use_fakeroot):
     """Lance la compilation dans un terminal"""
+    i18n = get_i18n()
     linux_dir = main_window.kernel_manager.base_dir / "linux"
-    
+
     try:
         kernel_version = linux_dir.resolve().name.replace("linux-", "")
     except:
         kernel_version = "unknown"
-    
+
     # Sauvegarder la config
     main_window.kernel_manager.backup_config(kernel_version, suffix)
-    
+
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_file = main_window.kernel_manager.log_dir / f"compile-{timestamp}.log"
-    
+
     fakeroot_cmd = "fakeroot " if use_fakeroot else ""
     suffix_cmd = f"LOCALVERSION={suffix}" if suffix else ""
-    
+
     start_time = datetime.now()
-    
+
     cmd = f"""
 cd '{linux_dir}' || exit 1
-echo '=== COMPILATION DU KERNEL ==='
-echo 'Threads: {jobs}'
-echo 'Suffixe: {suffix or "aucun"}'
-echo 'Fakeroot: {"oui" if use_fakeroot else "non"}'
+echo '{i18n._("compilation.header")}'
+echo '{i18n._("compilation.threads", count=jobs)}'
+echo '{i18n._("compilation.suffix", suffix=(suffix or i18n._("compilation.suffix_none")))}'
+echo '{i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no")))}'
 echo ''
-echo 'La compilation va démarrer...'
+echo '{i18n._("compilation.starting")}'
 sleep 2
 
 {fakeroot_cmd}make -j{jobs} bindeb-pkg {suffix_cmd} 2>&1 | tee '{log_file}'
@@ -122,22 +125,22 @@ RESULT=${{PIPESTATUS[0]}}
 echo ''
 echo '================================='
 if [ $RESULT -eq 0 ]; then
-    echo '✅ COMPILATION RÉUSSIE !'
-    
-    echo 'Déplacement des paquets...'
+    echo '{i18n._("compilation.success")}'
+
+    echo '{i18n._("compilation.moving_packages")}'
     for deb in ../*.deb; do
         if [ -f "$deb" ]; then
             mv "$deb" '{main_window.kernel_manager.repo_dir}/'
-            echo "✓ $(basename "$deb") déplacé"
+            echo "✓ $(basename "$deb") moved"
         fi
     done
 else
-    echo '❌ COMPILATION ÉCHOUÉE !'
-    echo 'Code retour: '$RESULT
+    echo '{i18n._("compilation.failed")}'
+    echo "Return code: $RESULT"
 fi
 echo '================================='
 echo ''
-echo 'Appuyez sur Entrée pour fermer...'
+echo '{i18n._("compilation.press_enter")}'
 read
 exit $RESULT
 """
@@ -156,11 +159,8 @@ exit $RESULT
             launched = True
             
             main_window.dialogs.show_info(
-                "Compilation lancée",
-                f"La compilation s'exécute dans le terminal\n\n"
-                f"Threads: {jobs}\n"
-                f"Suffixe: {suffix or 'aucun'}\n"
-                f"Log: {log_file}"
+                i18n._("message.success.title"),
+                i18n._("message.info.compilation_launched", threads=jobs, suffix=(suffix or i18n._("compilation.suffix_none")), log=str(log_file))
             )
             
             # Thread pour surveiller la fin
@@ -180,14 +180,14 @@ exit $RESULT
                 # Notification
                 if success:
                     main_window.kernel_manager.send_notification(
-                        "✅ Compilation réussie !",
-                        f"Kernel {kernel_version}{suffix} compilé en {duration//60}m {duration%60}s",
+                        i18n._("message.success.compilation_success"),
+                        i18n._("message.success.compilation_success_notification", version=kernel_version, suffix=suffix, time=f"{duration//60}m {duration%60}s"),
                         "low"
                     )
                 else:
                     main_window.kernel_manager.send_notification(
-                        "❌ Compilation échouée",
-                        f"Erreur lors de la compilation du kernel {kernel_version}{suffix}",
+                        i18n._("compilation.failed"),
+                        i18n._("compilation.failed_notification", version=kernel_version, suffix=suffix),
                         "critical"
                     )
             
@@ -198,4 +198,4 @@ exit $RESULT
             continue
     
     if not launched:
-        main_window.dialogs.show_error("Erreur", "Aucun terminal compatible trouvé")
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_terminal"))
