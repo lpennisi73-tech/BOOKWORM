@@ -67,6 +67,7 @@ class KernelManagerWindow(Gtk.Window):
         from gui.kernels_tab import create_kernels_tab
         from gui.packages_tab import create_packages_tab
         from gui.build_tab import create_build_tab
+        from gui.drivers_tab import create_drivers_tab
         from gui.profiles_tab import create_profiles_tab
         from gui.history_tab import create_history_tab
         from gui.sources_tab import create_sources_tab
@@ -88,6 +89,12 @@ class KernelManagerWindow(Gtk.Window):
             create_build_tab(self),
             "build",
             self.i18n._("tab.build")
+        )
+
+        self.stack.add_titled(
+            create_drivers_tab(self),
+            "drivers",
+            self.i18n._("tab.drivers")
         )
 
         self.stack.add_titled(
