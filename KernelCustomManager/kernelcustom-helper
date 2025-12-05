@@ -46,9 +46,34 @@ case "$ACTION" in
         rm -rf "$1"
         ;;
 
+    mokutil-list-enrolled)
+        # List enrolled MOK keys
+        mokutil --list-enrolled
+        ;;
+
+    mokutil-list-new)
+        # List pending MOK keys
+        mokutil --list-new
+        ;;
+
+    mokutil-import)
+        # Import MOK key
+        mokutil --import "$@"
+        ;;
+
+    mokutil-delete)
+        # Delete MOK key
+        mokutil --delete "$@"
+        ;;
+
+    mokutil-reset)
+        # Reset all MOK keys
+        mokutil --reset
+        ;;
+
     *)
         echo "Unknown action: $ACTION" >&2
-        echo "Usage: $0 {install-packages|remove-packages|reboot|copy-sources|create-link|remove-sources} [args...]" >&2
+        echo "Usage: $0 {install-packages|remove-packages|reboot|copy-sources|create-link|remove-sources|mokutil-*} [args...]" >&2
         exit 1
         ;;
 esac
