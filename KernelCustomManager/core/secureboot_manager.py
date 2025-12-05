@@ -181,6 +181,132 @@ class SecureBootManager:
 
         return False
 
+    # ==================== Vérification enrollment MOK ====================
+
+    def check_mok_enrolled(self):
+        """
+        Vérifie si une clé MOK est déjà enrollée
+        Returns: dict avec status, key_found, cn_name
+        """
+        try:
+            result = subprocess.run(
+                ["mokutil", "--list-enrolled"],
+                capture_output=True, text=True, check=False
+            )
+
+            output = result.stdout
+
+            if "MokListRT is empty" in output:
+                return {
+                    'status': 'none',
+                    'key_found': False,
+                    'cn_name': None,
+                    'message': 'No MOK keys enrolled'
+                }
+
+            # Chercher notre clé
+            if "kernelcustom" in output.lower():
+                return {
+                    'status': 'enrolled',
+                    'key_found': True,
+                    'cn_name': 'kernelcustom',
+                    'message': 'MOK key is already enrolled'
+                }
+
+            return {
+                'status': 'other_keys',
+                'key_found': False,
+                'cn_name': None,
+                'message': 'Other MOK keys found, but not ours'
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'key_found': False,
+                'cn_name': None,
+                'message': str(e)
+            }
+
+    def check_mok_pending(self):
+        """
+        Vérifie si une clé MOK est en attente d'enrollment
+        Returns: bool
+        """
+        try:
+            result = subprocess.run(
+                ["mokutil", "--list-new"],
+                capture_output=True, text=True, check=False
+            )
+
+            output = result.stdout
+            return not ("MokNew is empty" in output or output.strip() == "")
+        except:
+            return False
+
+    def enroll_mok_key(self, password=None):
+        """
+        Importe la clé MOK pour enrollment au prochain redémarrage
+        Args:
+            password: Mot de passe temporaire (si None, demandé interactivement)
+        Returns: dict avec success, message, needs_reboot
+        """
+        mok_key = self.keys_dir / "MOK.der"
+
+        if not mok_key.exists():
+            return {
+                'success': False,
+                'message': 'MOK key not found. Generate a key first.',
+                'needs_reboot': False
+            }
+
+        try:
+            # Importer la clé
+            cmd = ["mokutil", "--import", str(mok_key)]
+
+            if password:
+                # Mode non-interactif (si supporté par mokutil)
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                stdout, stderr = process.communicate(input=f"{password}\n{password}\n")
+                success = process.returncode == 0
+                error_msg = stderr if stderr else ""
+            else:
+                # Mode interactif (terminal)
+                result = subprocess.run(cmd, check=True)
+                success = result.returncode == 0
+                error_msg = ""
+
+            if success:
+                self.add_to_history(
+                    "MOK Enrollment",
+                    "MOK key imported, awaiting reboot",
+                    success=True
+                )
+
+                return {
+                    'success': True,
+                    'message': 'MOK key imported successfully. Reboot required.',
+                    'needs_reboot': True
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': f'Failed to import MOK key: {error_msg}',
+                    'needs_reboot': False
+                }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error: {str(e)}',
+                'needs_reboot': False
+            }
+
     # ==================== Gestion des clés MOK ====================
 
     def list_enrolled_keys(self):
@@ -562,6 +688,375 @@ class SecureBootManager:
         }
 
         return info
+
+    # ==================== Détection et gestion des kernels custom ====================
+
+    def get_custom_kernels(self):
+        """
+        Détecte tous les kernels personnalisés installés
+        Returns: list de dict avec kernel_version, path, module_count
+        """
+        modules_dir = Path("/lib/modules")
+        custom_kernels = []
+
+        if not modules_dir.exists():
+            return custom_kernels
+
+        for kernel_dir in modules_dir.iterdir():
+            if kernel_dir.is_dir() and "kernelcustom" in kernel_dir.name.lower():
+                # Compter les modules
+                modules = list(kernel_dir.rglob("*.ko"))
+
+                custom_kernels.append({
+                    'kernel_version': kernel_dir.name,
+                    'path': str(kernel_dir),
+                    'module_count': len(modules),
+                    'modules': [str(m) for m in modules]
+                })
+
+        return custom_kernels
+
+    def check_module_signed(self, module_path):
+        """
+        Vérifie si un module est signé
+        Returns: dict avec signed (bool), signer (str), sig_id (str)
+        """
+        try:
+            result = subprocess.run(
+                ["modinfo", "-F", "sig_id", module_path],
+                capture_output=True, text=True, check=False
+            )
+
+            sig_id = result.stdout.strip()
+
+            if not sig_id:
+                return {'signed': False, 'signer': None, 'sig_id': None}
+
+            # Récupérer le signataire
+            result2 = subprocess.run(
+                ["modinfo", "-F", "signer", module_path],
+                capture_output=True, text=True, check=False
+            )
+
+            signer = result2.stdout.strip()
+
+            return {
+                'signed': True,
+                'signer': signer,
+                'sig_id': sig_id
+            }
+        except:
+            return {'signed': False, 'signer': None, 'sig_id': None}
+
+    def resign_kernel_modules(self, kernel_version, progress_callback=None):
+        """
+        Re-signe tous les modules d'un kernel avec la clé MOK
+        Args:
+            kernel_version: Version du kernel (ex: "6.17.10-kernelcustom")
+            progress_callback: Fonction appelée pour chaque module (current, total, module_name)
+        Returns: dict avec success, signed_count, failed_count, errors
+        """
+        mok_priv = self.keys_dir / "MOK.priv"
+        mok_cert = self.keys_dir / "MOK.der"
+
+        if not mok_priv.exists() or not mok_cert.exists():
+            return {
+                'success': False,
+                'message': 'MOK keys not found',
+                'signed_count': 0,
+                'failed_count': 0,
+                'errors': []
+            }
+
+        # Trouver sign-file
+        sign_file = self._find_sign_file_tool()
+        if not sign_file:
+            return {
+                'success': False,
+                'message': 'sign-file tool not found',
+                'signed_count': 0,
+                'failed_count': 0,
+                'errors': []
+            }
+
+        # Trouver les modules
+        kernel_dir = Path(f"/lib/modules/{kernel_version}")
+        if not kernel_dir.exists():
+            return {
+                'success': False,
+                'message': f'Kernel directory not found: {kernel_dir}',
+                'signed_count': 0,
+                'failed_count': 0,
+                'errors': []
+            }
+
+        modules = list(kernel_dir.rglob("*.ko"))
+        total = len(modules)
+        signed = 0
+        failed = 0
+        errors = []
+
+        for i, module in enumerate(modules, 1):
+            if progress_callback:
+                progress_callback(i, total, module.name)
+
+            try:
+                result = subprocess.run(
+                    [str(sign_file), "sha256", str(mok_priv), str(mok_cert), str(module)],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                signed += 1
+            except subprocess.CalledProcessError as e:
+                failed += 1
+                errors.append(f"{module.name}: {e.stderr}")
+
+        success = failed == 0
+
+        self.add_to_history(
+            "Module Signing",
+            f"Kernel {kernel_version}: {signed} signed, {failed} failed",
+            success=success
+        )
+
+        return {
+            'success': success,
+            'message': f'Signed {signed}/{total} modules',
+            'signed_count': signed,
+            'failed_count': failed,
+            'errors': errors
+        }
+
+    def sign_vmlinuz(self, kernel_version, progress_callback=None):
+        """
+        Signe l'image vmlinuz d'un kernel avec la clé MOK
+        Args:
+            kernel_version: Version du kernel (ex: "6.17.10-kernelcustom")
+            progress_callback: Fonction appelée pour suivre le progrès
+        Returns: dict avec success, message
+        """
+        mok_priv = self.keys_dir / "MOK.priv"
+        mok_cert = self.keys_dir / "MOK.pem"
+
+        if not mok_priv.exists() or not mok_cert.exists():
+            return {
+                'success': False,
+                'message': 'MOK keys not found. Generate keys first.'
+            }
+
+        # Trouver l'image vmlinuz
+        vmlinuz_path = Path(f"/boot/vmlinuz-{kernel_version}")
+        if not vmlinuz_path.exists():
+            return {
+                'success': False,
+                'message': f'vmlinuz not found: {vmlinuz_path}'
+            }
+
+        # Vérifier que sbsign est installé
+        if not self._check_command('sbsign'):
+            return {
+                'success': False,
+                'message': 'sbsign not installed. Install sbsigntool package.'
+            }
+
+        try:
+            if progress_callback:
+                progress_callback(0, 100, "Creating backup")
+
+            # Créer backup si nécessaire
+            backup_path = vmlinuz_path.with_suffix('.unsigned')
+            if not backup_path.exists():
+                shutil.copy2(vmlinuz_path, backup_path)
+
+            if progress_callback:
+                progress_callback(30, 100, "Signing vmlinuz")
+
+            # Signer l'image
+            signed_path = vmlinuz_path.with_suffix('.signed')
+            result = subprocess.run([
+                "sbsign",
+                "--key", str(mok_priv),
+                "--cert", str(mok_cert),
+                "--output", str(signed_path),
+                str(vmlinuz_path)
+            ], capture_output=True, text=True, check=True)
+
+            if progress_callback:
+                progress_callback(70, 100, "Replacing original")
+
+            # Remplacer l'original
+            shutil.move(str(signed_path), str(vmlinuz_path))
+
+            if progress_callback:
+                progress_callback(90, 100, "Verifying signature")
+
+            # Vérifier la signature
+            verify_result = subprocess.run([
+                "sbverify",
+                "--cert", str(mok_cert),
+                str(vmlinuz_path)
+            ], capture_output=True, text=True, check=False)
+
+            verified = verify_result.returncode == 0
+
+            if progress_callback:
+                progress_callback(100, 100, "Done")
+
+            self.add_to_history(
+                "vmlinuz Signing",
+                f"Signed vmlinuz-{kernel_version}, verified={verified}",
+                success=True
+            )
+
+            return {
+                'success': True,
+                'message': f'vmlinuz signed successfully. Verified: {verified}',
+                'verified': verified
+            }
+
+        except subprocess.CalledProcessError as e:
+            return {
+                'success': False,
+                'message': f'Failed to sign vmlinuz: {e.stderr if e.stderr else str(e)}'
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error: {str(e)}'
+            }
+
+    def sign_all_custom_vmlinuz(self, progress_callback=None):
+        """
+        Signe tous les vmlinuz des kernels custom
+        Returns: dict avec success, signed_count, failed_count, results
+        """
+        custom_kernels = self.get_custom_kernels()
+
+        if not custom_kernels:
+            return {
+                'success': False,
+                'message': 'No custom kernels found',
+                'signed_count': 0,
+                'failed_count': 0,
+                'results': []
+            }
+
+        signed_count = 0
+        failed_count = 0
+        results = []
+
+        total = len(custom_kernels)
+        for i, kernel in enumerate(custom_kernels, 1):
+            kernel_ver = kernel['kernel_version']
+
+            if progress_callback:
+                progress_callback(i, total, kernel_ver)
+
+            result = self.sign_vmlinuz(kernel_ver)
+            results.append({
+                'kernel': kernel_ver,
+                'success': result['success'],
+                'message': result['message']
+            })
+
+            if result['success']:
+                signed_count += 1
+            else:
+                failed_count += 1
+
+        return {
+            'success': failed_count == 0,
+            'message': f'Signed {signed_count}/{total} vmlinuz images',
+            'signed_count': signed_count,
+            'failed_count': failed_count,
+            'results': results
+        }
+
+    # ==================== Diagnostic automatique ====================
+
+    def diagnose_secureboot_issue(self):
+        """
+        Diagnostique automatique des problèmes SecureBoot
+        Returns: dict avec issue_type, message, solutions (list)
+        """
+        diagnosis = {
+            'issue_type': None,
+            'message': '',
+            'solutions': []
+        }
+
+        # 1. Vérifier UEFI
+        if not self.is_uefi_system():
+            diagnosis['issue_type'] = 'NOT_UEFI'
+            diagnosis['message'] = 'System is not using UEFI. SecureBoot requires UEFI.'
+            diagnosis['solutions'] = [
+                'Convert to UEFI boot (advanced)',
+                'Disable SecureBoot and use Legacy boot'
+            ]
+            return diagnosis
+
+        # 2. Vérifier statut SecureBoot
+        sb_status = self.get_secureboot_status()
+        if not sb_status['enabled']:
+            diagnosis['issue_type'] = 'SB_DISABLED'
+            diagnosis['message'] = 'SecureBoot is disabled in BIOS/UEFI'
+            diagnosis['solutions'] = [
+                'Enable SecureBoot in BIOS settings',
+                'Keep SecureBoot disabled (less secure)'
+            ]
+            return diagnosis
+
+        # 3. Vérifier enrollment MOK
+        mok_status = self.check_mok_enrolled()
+        if not mok_status['key_found']:
+            if self.check_mok_pending():
+                diagnosis['issue_type'] = 'MOK_PENDING'
+                diagnosis['message'] = 'MOK key is pending enrollment. Reboot required.'
+                diagnosis['solutions'] = [
+                    'Reboot and follow MOK Manager instructions',
+                    'Cancel pending enrollment and re-enroll'
+                ]
+            else:
+                diagnosis['issue_type'] = 'MOK_NOT_ENROLLED'
+                diagnosis['message'] = 'MOK key is not enrolled. Cannot boot custom kernels.'
+                diagnosis['solutions'] = [
+                    'Enroll MOK key (automated wizard available)',
+                    'Disable SecureBoot to boot without signature'
+                ]
+            return diagnosis
+
+        # 4. Vérifier signature des kernels custom
+        custom_kernels = self.get_custom_kernels()
+        if custom_kernels:
+            unsigned_kernels = []
+            wrong_signature_kernels = []
+
+            for kernel in custom_kernels:
+                if kernel['modules']:
+                    # Vérifier un module échantillon
+                    sample_module = kernel['modules'][0]
+                    sig_info = self.check_module_signed(sample_module)
+
+                    if not sig_info['signed']:
+                        unsigned_kernels.append(kernel['kernel_version'])
+                    elif sig_info['signer'] and 'kernelcustom' not in sig_info['signer'].lower():
+                        wrong_signature_kernels.append(kernel['kernel_version'])
+
+            if unsigned_kernels or wrong_signature_kernels:
+                diagnosis['issue_type'] = 'MODULES_NOT_SIGNED'
+                diagnosis['message'] = f'Custom kernel modules are not properly signed. Unsigned: {len(unsigned_kernels)}, Wrong signature: {len(wrong_signature_kernels)}'
+                diagnosis['solutions'] = [
+                    'Re-sign all custom kernel modules (automated tool available)',
+                    'Recompile kernels with "Sign for SecureBoot" option'
+                ]
+                return diagnosis
+
+        # Tout est OK !
+        diagnosis['issue_type'] = 'OK'
+        diagnosis['message'] = 'SecureBoot is properly configured'
+        diagnosis['solutions'] = []
+        return diagnosis
 
     # ==================== Automatisation pour kernels personnalisés ====================
 
