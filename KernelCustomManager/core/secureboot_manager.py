@@ -203,7 +203,7 @@ class SecureBootManager:
         """
         try:
             result = subprocess.run(
-                ["mokutil", "--list-enrolled"],
+                ["pkexec", "mokutil", "--list-enrolled"],
                 capture_output=True, text=True, check=False
             )
 
@@ -247,7 +247,7 @@ class SecureBootManager:
         """
         try:
             result = subprocess.run(
-                ["mokutil", "--list-new"],
+                ["pkexec", "mokutil", "--list-new"],
                 capture_output=True, text=True, check=False
             )
 
@@ -273,8 +273,8 @@ class SecureBootManager:
             }
 
         try:
-            # Importer la clé
-            cmd = ["mokutil", "--import", str(mok_key)]
+            # Importer la clé avec pkexec
+            cmd = ["pkexec", "mokutil", "--import", str(mok_key)]
 
             if password:
                 # Mode non-interactif (si supporté par mokutil)
@@ -326,7 +326,7 @@ class SecureBootManager:
         """Liste les clés MOK enrollées"""
         try:
             result = subprocess.run(
-                ["mokutil", "--list-enrolled"],
+                ["pkexec", "mokutil", "--list-enrolled"],
                 capture_output=True,
                 text=True,
                 check=False
@@ -370,7 +370,7 @@ class SecureBootManager:
         """Liste les clés en attente d'enrollment"""
         try:
             result = subprocess.run(
-                ["mokutil", "--list-new"],
+                ["pkexec", "mokutil", "--list-new"],
                 capture_output=True,
                 text=True,
                 check=False
@@ -401,7 +401,7 @@ class SecureBootManager:
             # mokutil --import demande un mot de passe interactivement
             # On ne peut pas l'automatiser complètement
             result = subprocess.run(
-                ["mokutil", "--import", str(key_path)],
+                ["pkexec", "mokutil", "--import", str(key_path)],
                 capture_output=True,
                 text=True,
                 check=False
@@ -434,7 +434,7 @@ class SecureBootManager:
 
         try:
             result = subprocess.run(
-                ["mokutil", "--delete", str(key_path)],
+                ["pkexec", "mokutil", "--delete", str(key_path)],
                 capture_output=True,
                 text=True,
                 check=False
@@ -460,7 +460,7 @@ class SecureBootManager:
         """Réinitialise toutes les clés MOK"""
         try:
             result = subprocess.run(
-                ["mokutil", "--reset"],
+                ["pkexec", "mokutil", "--reset"],
                 capture_output=True,
                 text=True,
                 check=False
