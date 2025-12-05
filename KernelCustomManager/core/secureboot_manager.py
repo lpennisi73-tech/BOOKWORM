@@ -11,6 +11,7 @@ from datetime import datetime
 import shutil
 import os
 import logging
+import threading
 
 # Configurer le logging
 log_file = Path.home() / "KernelCustomManager" / "build" / "secureboot" / "sign_debug.log"
@@ -51,6 +52,7 @@ class SecureBootManager:
 
         # Cache pour les données MOK (évite de demander le mot de passe plusieurs fois)
         self._mok_cache = None
+        self._mok_cache_lock = threading.Lock()
 
     # ==================== Historique ====================
 
@@ -204,37 +206,53 @@ class SecureBootManager:
         Récupère toutes les données MOK en une seule commande (évite de demander le mot de passe plusieurs fois)
         Returns: dict avec enrolled_output et pending_output
         """
+        import traceback
+
+        # Vérifier le cache sans lock d'abord (optimisation)
         if self._mok_cache is not None:
+            print(f"[DEBUG] _fetch_mok_data: Using CACHE (instance id: {id(self)})")
             return self._mok_cache
 
-        try:
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-diagnose"],
-                capture_output=True, text=True, check=False
-            )
+        # Utiliser un lock pour éviter les appels parallèles
+        with self._mok_cache_lock:
+            # Re-vérifier le cache après avoir acquis le lock
+            # (un autre thread a pu le remplir pendant qu'on attendait le lock)
+            if self._mok_cache is not None:
+                print(f"[DEBUG] _fetch_mok_data: Using CACHE after lock (instance id: {id(self)})")
+                return self._mok_cache
 
-            if result.returncode != 0:
+            print(f"[DEBUG] _fetch_mok_data: CALLING pkexec (instance id: {id(self)})")
+            print(f"[DEBUG] Stack trace:")
+            traceback.print_stack()
+
+            try:
+                result = subprocess.run(
+                    ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-diagnose"],
+                    capture_output=True, text=True, check=False
+                )
+
+                if result.returncode != 0:
+                    return {'enrolled_output': '', 'pending_output': ''}
+
+                output = result.stdout
+
+                # Parser la sortie pour séparer ENROLLED et PENDING
+                enrolled_output = ''
+                pending_output = ''
+
+                if 'ENROLLED:' in output and 'PENDING:' in output:
+                    parts = output.split('PENDING:')
+                    enrolled_output = parts[0].replace('ENROLLED:', '').strip()
+                    pending_output = parts[1].strip()
+
+                self._mok_cache = {
+                    'enrolled_output': enrolled_output,
+                    'pending_output': pending_output
+                }
+
+                return self._mok_cache
+            except Exception:
                 return {'enrolled_output': '', 'pending_output': ''}
-
-            output = result.stdout
-
-            # Parser la sortie pour séparer ENROLLED et PENDING
-            enrolled_output = ''
-            pending_output = ''
-
-            if 'ENROLLED:' in output and 'PENDING:' in output:
-                parts = output.split('PENDING:')
-                enrolled_output = parts[0].replace('ENROLLED:', '').strip()
-                pending_output = parts[1].strip()
-
-            self._mok_cache = {
-                'enrolled_output': enrolled_output,
-                'pending_output': pending_output
-            }
-
-            return self._mok_cache
-        except Exception:
-            return {'enrolled_output': '', 'pending_output': ''}
 
     def check_mok_enrolled(self):
         """
