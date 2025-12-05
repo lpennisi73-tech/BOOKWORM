@@ -1,6 +1,6 @@
-# 🚀 KernelCustom Manager - Professional Edition v2.2
+# 🚀 KernelCustom Manager - SecureBoot Edition v2.3
 
-[![Version](https://img.shields.io/badge/version-2.2-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
+[![Version](https://img.shields.io/badge/version-2.3-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![GTK](https://img.shields.io/badge/GTK-3.0-orange.svg)](https://www.gtk.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-red.svg)](LICENSE)
@@ -9,6 +9,7 @@
 **KernelCustom Manager** est un gestionnaire complet de kernels Linux et de drivers GPU pour Ubuntu/Debian, offrant une interface graphique intuitive pour :
 - 🔧 Compiler et gérer des kernels personnalisés
 - 🎮 Installer et gérer des drivers GPU (NVIDIA, AMD, Intel)
+- 🔒 Gérer SecureBoot et signer les modules kernel
 - 💾 Créer des profils de configuration
 - 📜 Suivre l'historique des installations
 - ⏮️ Effectuer des rollbacks en cas de problème
@@ -36,6 +37,22 @@
 - **Historique complet** : Traçabilité de toutes les opérations
 - **Interface à 3 onglets** : Installation, Historique, Rollback
 
+### 🔒 **Gestion SecureBoot (v2.3)** 🆕
+- **Détection automatique** : Statut UEFI et SecureBoot
+- **Gestion des clés MOK** :
+  - Lister les clés enrollées
+  - Importer/Supprimer des clés
+  - Réinitialisation complète
+- **Signature de modules** :
+  - Génération de clés de signature RSA-2048
+  - Signature manuelle de modules .ko
+  - Vérification des signatures existantes
+- **Automatisation intelligente** :
+  - Option de signature pendant la compilation
+  - Signature automatique après compilation réussie
+  - Génération de clés à la demande
+- **Interface à 4 onglets** : Statut, Clés MOK, Signature, Historique
+
 ### 🌍 **Multilingue**
 - Français 🇫🇷
 - Anglais 🇬🇧
@@ -53,6 +70,9 @@ sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-notif
 
 # Outils de compilation (pour kernels)
 sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
+
+# Outils SecureBoot (optionnel, pour systèmes UEFI)
+sudo apt install mokutil openssl
 ```
 
 ### Installation
@@ -105,6 +125,29 @@ python3 kernelcustom_manager.py
 # 3. Consulter l'onglet "⏮️ Rollback" pour voir toutes les sauvegardes
 ```
 
+### 4. **Utiliser SecureBoot avec un Kernel Personnalisé** 🔒
+
+```bash
+# Première utilisation - Configuration initiale
+# 1. Aller dans l'onglet "SecureBoot"
+# 2. Vérifier le statut UEFI et SecureBoot
+# 3. Installer les dépendances si nécessaire (bouton "Installer les dépendances")
+# 4. Aller dans l'onglet "✍️ Signature"
+# 5. Générer une nouvelle clé de signature (nom: "kernel-signing")
+# 6. Aller dans l'onglet "🔑 Clés MOK"
+# 7. Importer le certificat généré (~/KernelCustomManager/build/secureboot/keys/kernel-signing.der)
+# 8. Redémarrer le système
+# 9. Au boot, dans le MOK Manager : sélectionner "Enroll MOK", entrer le mot de passe, redémarrer
+
+# Compiler un kernel avec signature automatique
+# 1. Aller dans l'onglet "Compiler"
+# 2. Télécharger et configurer un kernel normalement
+# 3. Cliquer "🔨 Compiler le kernel"
+# 4. ✅ Cocher "🔒 Signer pour SecureBoot" dans le dialogue
+# 5. Après compilation réussie, les modules seront automatiquement signés
+# 6. Installer le kernel compilé depuis "Paquets locaux"
+```
+
 ---
 
 ## 📖 Documentation
@@ -123,13 +166,15 @@ KernelCustomManager/
 ├── kernelcustom_manager.py         # Point d'entrée principal
 ├── core/                           # Logique métier
 │   ├── kernel_manager.py           # Gestion des kernels
-│   └── driver_manager.py           # Gestion des drivers GPU (v2.2)
+│   ├── driver_manager.py           # Gestion des drivers GPU (v2.2)
+│   └── secureboot_manager.py       # Gestion SecureBoot (v2.3)
 ├── gui/                            # Interface graphique GTK3
 │   ├── main_window.py              # Fenêtre principale
 │   ├── kernels_tab.py              # Onglet kernels installés
 │   ├── packages_tab.py             # Onglet paquets locaux
 │   ├── build_tab.py                # Onglet compilation
 │   ├── drivers_tab.py              # Onglet drivers GPU (v2.2)
+│   ├── secureboot_tab.py           # Onglet SecureBoot (v2.3)
 │   ├── profiles_tab.py             # Onglet profils
 │   ├── history_tab.py              # Onglet historique
 │   └── sources_tab.py              # Onglet sources système
@@ -182,6 +227,52 @@ Toutes les opérations sont enregistrées :
 }
 ```
 
+### 🔒 SecureBoot Intelligent (v2.3)
+
+#### Qu'est-ce que SecureBoot ?
+SecureBoot est une fonctionnalité de sécurité UEFI qui empêche le chargement de code non signé au démarrage. Cela pose problème pour les kernels personnalisés, car leurs modules ne sont pas signés par défaut.
+
+#### Solution KernelCustom Manager
+KernelCustom Manager simplifie grandement ce processus complexe :
+
+**🎯 Workflow automatisé :**
+1. **Détection automatique** : Vérifie si SecureBoot est activé sur votre système
+2. **Proposition intelligente** : Lors de la compilation, propose automatiquement la signature
+3. **Génération de clés** : Crée des clés de signature RSA-2048 si nécessaire
+4. **Signature automatique** : Signe tous les modules kernel après compilation
+5. **Import guidé** : Guide l'utilisateur pour enrolle les clés dans le MOK Manager
+
+**📊 Exemple de workflow complet :**
+```bash
+# 1. Vérification initiale
+SecureBoot détecté comme activé ✅
+→ Option "Signer pour SecureBoot" apparaît automatiquement
+
+# 2. Première compilation avec SecureBoot
+Compilation terminée avec succès ✅
+→ Dialogue : "Aucune clé trouvée, générer maintenant ?"
+→ Clé générée : kernel-signing.priv + kernel-signing.der
+→ Signature automatique de 2847 modules ✅
+
+# 3. Import dans MOK Manager
+→ Guide : Redémarrer → MOK Manager → Enroll MOK
+→ Entrer mot de passe → Redémarrer
+→ SecureBoot + Kernel personnalisé fonctionnels ✅
+```
+
+**🔐 Sécurité :**
+- Clés stockées dans `~/KernelCustomManager/build/secureboot/keys/`
+- Support des formats DER, PEM, CER
+- Historique chiffré de toutes les opérations
+- Pas de bypass des protections UEFI natives
+
+**⚡ Fonctionnalités avancées :**
+- Vérification du statut SecureBoot (3 méthodes de détection)
+- Gestion complète des clés MOK (liste, import, suppression, reset)
+- Signature manuelle de modules individuels
+- Vérification des signatures existantes
+- Support des kernels avec suffixes personnalisés
+
 ---
 
 ## 🔧 Configuration
@@ -201,6 +292,10 @@ export LANG=fr_FR.UTF-8  # ou en_US.UTF-8
 ├── configs/                  # Configurations kernel sauvegardées
 ├── profiles/                 # Profils utilisateur
 ├── drivers_backup/           # Sauvegardes de drivers
+├── secureboot/               # Dossier SecureBoot (v2.3)
+│   ├── keys/                 # Clés de signature générées
+│   ├── backups/              # Sauvegardes de clés
+│   └── secureboot_history.json  # Historique des opérations SecureBoot
 ├── drivers_history.json      # Historique des opérations drivers
 └── compilation_history.json  # Historique des compilations
 ```
@@ -236,6 +331,8 @@ Nous cherchons des testeurs avec :
 | Historique | ✅ Complet | ❌ | ❌ | ❌ |
 | Installation Wayland | ✅ Automatique | ⚠️ Manuel | ⚠️ Manuel | ⚠️ Manuel |
 | Compilation Kernel | ✅ Intégré | ❌ | ❌ | ❌ |
+| Gestion SecureBoot | ✅ Automatique | ❌ | ❌ | ❌ |
+| Signature modules | ✅ Intégré | ❌ | ❌ | ❌ |
 | Interface | ✅ GTK3 moderne | 🖥️ CLI | ✅ GTK basique | ✅ Qt |
 
 ---
@@ -255,6 +352,14 @@ La compilation de kernels personnalisés :
 - Prend 30-90 minutes selon votre CPU
 - Peut rendre le système non bootable si mal configuré
 - **Créez toujours un point de restauration avant**
+
+### SecureBoot et Kernels Personnalisés
+Utilisation de kernels personnalisés avec SecureBoot activé :
+- **Nécessite** la signature des modules kernel
+- **KernelCustom Manager simplifie** grandement ce processus
+- **Première utilisation** : génération de clés + import dans MOK Manager
+- **Compilations suivantes** : signature automatique
+- **IMPORTANT** : Ne désactivez jamais SecureBoot sans comprendre les implications de sécurité
 
 ---
 
@@ -293,6 +398,32 @@ sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
 cat ~/KernelCustomManager/build/logs/compile_XXXXXXXX.log
 ```
 
+### Problèmes avec SecureBoot
+```bash
+# Vérifier le statut SecureBoot
+mokutil --sb-state
+
+# Lister les clés MOK enrollées
+mokutil --list-enrolled
+
+# Vérifier qu'un module est signé
+modinfo -F sig_id /path/to/module.ko
+
+# Réinstaller les dépendances SecureBoot
+sudo apt install --reinstall mokutil openssl
+
+# Consulter l'historique SecureBoot
+cat ~/KernelCustomManager/build/secureboot/secureboot_history.json
+
+# Emplacement des clés générées
+ls -la ~/KernelCustomManager/build/secureboot/keys/
+
+# Si le kernel personnalisé ne boot pas avec SecureBoot activé
+# 1. Vérifier que les modules sont signés : modinfo -F sig_id /lib/modules/$(uname -r)/kernel/.../*.ko
+# 2. Vérifier que la clé MOK est bien enrollée : mokutil --list-enrolled
+# 3. Vérifier les logs du kernel : dmesg | grep -i "signature"
+```
+
 ---
 
 ## 📝 License
@@ -314,7 +445,9 @@ Ce projet est sous licence **GPL-3.0**. Voir le fichier [LICENSE](LICENSE) pour 
 
 **BOOKWORM** - Développeur principal
 
-Avec l'aide de **Claude AI** (Anthropic) pour le module de gestion des drivers GPU v2.2
+Avec l'aide de **Claude AI** (Anthropic) pour :
+- Module de gestion des drivers GPU v2.2
+- Module de gestion SecureBoot v2.3
 
 ---
 
@@ -328,6 +461,20 @@ Avec l'aide de **Claude AI** (Anthropic) pour le module de gestion des drivers G
 ---
 
 ## 📅 Historique des Versions
+
+### v2.3 (2025-12-05) - SecureBoot Edition 🔒
+- ✨ **Module SecureBoot complet** (1200+ lignes de code)
+  - Détection automatique UEFI et SecureBoot
+  - Gestion complète des clés MOK
+  - Génération de clés de signature RSA-2048
+  - Signature automatique des modules kernel
+  - Intégration dans le workflow de compilation
+  - Interface à 4 onglets
+- 🤖 **Automatisation intelligente**
+  - Proposition automatique de signature si SecureBoot activé
+  - Génération de clés à la demande
+  - Workflow guidé pour l'enrollment MOK
+- 🌍 50+ nouvelles traductions (FR/EN)
 
 ### v2.2 (2025-10-28) - Professional Edition 🚀
 - ✨ **Module Drivers GPU complet** (2886 lignes de code)

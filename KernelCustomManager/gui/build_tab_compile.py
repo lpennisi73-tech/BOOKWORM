@@ -10,6 +10,7 @@ import threading
 import os
 from datetime import datetime
 from utils.i18n import get_i18n
+from core.secureboot_manager import SecureBootManager
 
 
 def show_compile_dialog(main_window):
@@ -66,6 +67,20 @@ def show_compile_dialog(main_window):
     fakeroot_check.set_active(True)
     content.pack_start(fakeroot_check, False, False, 0)
 
+    # SecureBoot signing option
+    sb_manager = SecureBootManager()
+    secureboot_check = None
+
+    if sb_manager.should_prompt_for_signing():
+        secureboot_check = Gtk.CheckButton(label=i18n._("dialog.compile.sign_for_secureboot"))
+        secureboot_check.set_active(False)
+        content.pack_start(secureboot_check, False, False, 0)
+
+        sb_info_label = Gtk.Label()
+        sb_info_label.set_markup(f"<small><i>{i18n._('dialog.compile.secureboot_info')}</i></small>")
+        sb_info_label.set_line_wrap(True)
+        content.pack_start(sb_info_label, False, False, 0)
+
     # Info
     info_label = Gtk.Label()
     info_label.set_markup(f"<i>{i18n._('dialog.compile.estimated_time')}</i>")
@@ -81,14 +96,15 @@ def show_compile_dialog(main_window):
         jobs = int(threads_spin.get_value())
         suffix = suffix_entry.get_text().strip()
         use_fakeroot = fakeroot_check.get_active()
-        
+        sign_for_secureboot = secureboot_check.get_active() if secureboot_check else False
+
         dialog.destroy()
-        compile_kernel(main_window, jobs, suffix, use_fakeroot)
+        compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot)
     else:
         dialog.destroy()
 
 
-def compile_kernel(main_window, jobs, suffix, use_fakeroot):
+def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=False):
     """Lance la compilation dans un terminal"""
     i18n = get_i18n()
     linux_dir = main_window.kernel_manager.base_dir / "linux"
@@ -109,17 +125,140 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot):
 
     start_time = datetime.now()
 
+    # Préparer les variables pour la signature SecureBoot
+    signing_script = ""
+    if sign_for_secureboot:
+        sb_manager = SecureBootManager()
+        keys_dir = sb_manager.keys_dir
+        available_keys = list(keys_dir.glob("*.priv"))
+
+        if available_keys:
+            # Utiliser la première clé disponible (ou kernel-signing si elle existe)
+            key_file = None
+            for k in available_keys:
+                if k.stem == "kernel-signing":
+                    key_file = k
+                    break
+            if not key_file:
+                key_file = available_keys[0]
+
+            priv_key = key_file
+            cert = key_file.with_suffix('.der')
+
+            if cert.exists():
+                signing_script = f"""
+echo ''
+echo '================================='
+echo '{i18n._("secureboot.signing_modules_before_packaging")}'
+echo '================================='
+
+# Trouver l'outil sign-file
+SIGN_FILE=""
+for location in "/usr/src/linux-headers-$(uname -r)/scripts/sign-file" \\
+                "/lib/modules/$(uname -r)/build/scripts/sign-file" \\
+                "scripts/sign-file"; do
+    if [ -f "$location" ]; then
+        SIGN_FILE="$location"
+        break
+    fi
+done
+
+if [ -z "$SIGN_FILE" ]; then
+    echo "❌ Error: sign-file tool not found"
+    exit 1
+fi
+
+echo ""
+echo "🔍 {i18n._("secureboot.counting_modules")}..."
+
+# Compter d'abord tous les modules
+MODULES=($(find . -name "*.ko"))
+TOTAL_MODULES=${{#MODULES[@]}}
+
+echo "📦 {i18n._("secureboot.found_modules")}: $TOTAL_MODULES"
+echo ""
+
+if [ "$TOTAL_MODULES" -eq 0 ]; then
+    echo "⚠️  {i18n._("secureboot.no_modules_found")}"
+else
+    echo "🔐 {i18n._("secureboot.starting_signature")}..."
+    echo ""
+
+    # Signer tous les modules avec affichage de progression
+    SIGNED_COUNT=0
+    FAILED_COUNT=0
+    CURRENT=0
+
+    for module in "${{MODULES[@]}}"; do
+        CURRENT=$((CURRENT + 1))
+        MODULE_NAME=$(basename "$module")
+
+        # Afficher la progression tous les modules ou tous les 10 modules si > 50
+        if [ "$TOTAL_MODULES" -le 50 ] || [ $((CURRENT % 10)) -eq 0 ] || [ "$CURRENT" -eq "$TOTAL_MODULES" ]; then
+            printf "\\r🔏 [{i18n._("secureboot.progress")}: %3d/%3d] {i18n._("secureboot.signing")}: %-50s" "$CURRENT" "$TOTAL_MODULES" "$MODULE_NAME"
+        fi
+
+        if "$SIGN_FILE" sha256 '{priv_key}' '{cert}' "$module" 2>&1 | grep -q "Signing module"; then
+            SIGNED_COUNT=$((SIGNED_COUNT + 1))
+        elif "$SIGN_FILE" sha256 '{priv_key}' '{cert}' "$module" >/dev/null 2>&1; then
+            SIGNED_COUNT=$((SIGNED_COUNT + 1))
+        else
+            FAILED_COUNT=$((FAILED_COUNT + 1))
+            # Afficher les erreurs sur une nouvelle ligne
+            echo ""
+            echo "  ⚠️  {i18n._("secureboot.failed_to_sign")}: $MODULE_NAME"
+        fi
+    done
+
+    echo ""
+    echo ""
+
+    if [ "$FAILED_COUNT" -eq 0 ]; then
+        echo "✅ {i18n._("secureboot.all_modules_signed")}: $SIGNED_COUNT"
+    else
+        echo "⚠️  {i18n._("secureboot.modules_signed_with_errors")}: $SIGNED_COUNT/$TOTAL_MODULES ({i18n._("secureboot.signing_failed")}: $FAILED_COUNT)"
+    fi
+fi
+
+echo '================================='
+echo ''
+"""
+
     cmd = f"""
 cd '{linux_dir}' || exit 1
 echo '{i18n._("compilation.header")}'
 echo '{i18n._("compilation.threads", count=jobs)}'
 echo '{i18n._("compilation.suffix", suffix=(suffix or i18n._("compilation.suffix_none")))}'
 echo '{i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no")))}'
+{"echo 'SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + "'" if sign_for_secureboot else ""}
 echo ''
 echo '{i18n._("compilation.starting")}'
 sleep 2
 
-{fakeroot_cmd}make -j{jobs} bindeb-pkg {suffix_cmd} 2>&1 | tee '{log_file}'
+# Étape 1: Compilation des modules
+echo ''
+echo '{i18n._("compilation.compiling_modules")}'
+make -j{jobs} {suffix_cmd} 2>&1 | tee '{log_file}'
+RESULT=${{PIPESTATUS[0]}}
+
+if [ $RESULT -ne 0 ]; then
+    echo ''
+    echo '================================='
+    echo '{i18n._("compilation.failed")}'
+    echo "Return code: $RESULT"
+    echo '================================='
+    echo ''
+    echo '{i18n._("compilation.press_enter")}'
+    read
+    exit $RESULT
+fi
+
+{signing_script}
+
+# Étape 2: Création du package .deb
+echo ''
+echo '{i18n._("compilation.creating_package")}'
+{fakeroot_cmd}make bindeb-pkg {suffix_cmd} 2>&1 | tee -a '{log_file}'
 RESULT=${{PIPESTATUS[0]}}
 
 echo ''
@@ -168,15 +307,15 @@ exit $RESULT
                 process.wait()
                 end_time = datetime.now()
                 duration = int((end_time - start_time).total_seconds())
-                
+
                 success = process.returncode == 0
                 packages = [p.name for p in main_window.kernel_manager.repo_dir.glob("linux-*.deb")]
-                
+
                 # Ajouter à l'historique
                 main_window.kernel_manager.add_compilation_to_history(
                     kernel_version, suffix, success, duration, packages
                 )
-                
+
                 # Notification
                 if success:
                     main_window.kernel_manager.send_notification(
@@ -190,7 +329,7 @@ exit $RESULT
                         i18n._("compilation.failed_notification", version=kernel_version, suffix=suffix),
                         "critical"
                     )
-            
+
             threading.Thread(target=monitor_compilation, daemon=True).start()
             break
             
