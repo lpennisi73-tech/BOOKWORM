@@ -49,6 +49,9 @@ class SecureBootManager:
         if not self.history_file.exists():
             self._save_history([])
 
+        # Cache pour les données MOK (évite de demander le mot de passe plusieurs fois)
+        self._mok_cache = None
+
     # ==================== Historique ====================
 
     def _save_history(self, history):
@@ -196,18 +199,51 @@ class SecureBootManager:
 
     # ==================== Vérification enrollment MOK ====================
 
+    def _fetch_mok_data(self):
+        """
+        Récupère toutes les données MOK en une seule commande (évite de demander le mot de passe plusieurs fois)
+        Returns: dict avec enrolled_output et pending_output
+        """
+        if self._mok_cache is not None:
+            return self._mok_cache
+
+        try:
+            result = subprocess.run(
+                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-diagnose"],
+                capture_output=True, text=True, check=False
+            )
+
+            if result.returncode != 0:
+                return {'enrolled_output': '', 'pending_output': ''}
+
+            output = result.stdout
+
+            # Parser la sortie pour séparer ENROLLED et PENDING
+            enrolled_output = ''
+            pending_output = ''
+
+            if 'ENROLLED:' in output and 'PENDING:' in output:
+                parts = output.split('PENDING:')
+                enrolled_output = parts[0].replace('ENROLLED:', '').strip()
+                pending_output = parts[1].strip()
+
+            self._mok_cache = {
+                'enrolled_output': enrolled_output,
+                'pending_output': pending_output
+            }
+
+            return self._mok_cache
+        except Exception:
+            return {'enrolled_output': '', 'pending_output': ''}
+
     def check_mok_enrolled(self):
         """
         Vérifie si une clé MOK est déjà enrollée
         Returns: dict avec status, key_found, cn_name
         """
         try:
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-list-enrolled"],
-                capture_output=True, text=True, check=False
-            )
-
-            output = result.stdout
+            mok_data = self._fetch_mok_data()
+            output = mok_data['enrolled_output']
 
             if "MokListRT is empty" in output:
                 return {
@@ -246,12 +282,8 @@ class SecureBootManager:
         Returns: bool
         """
         try:
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-list-new"],
-                capture_output=True, text=True, check=False
-            )
-
-            output = result.stdout
+            mok_data = self._fetch_mok_data()
+            output = mok_data['pending_output']
             return not ("MokNew is empty" in output or output.strip() == "")
         except:
             return False

@@ -71,6 +71,15 @@ case "$ACTION" in
         mokutil --reset
         ;;
 
+    mokutil-diagnose)
+        # Run all diagnostic commands in one go (prevents multiple password prompts)
+        # Output format: ENROLLED:<output>\nPENDING:<output>
+        echo "ENROLLED:"
+        mokutil --list-enrolled 2>&1
+        echo "PENDING:"
+        mokutil --list-new 2>&1
+        ;;
+
     *)
         echo "Unknown action: $ACTION" >&2
         echo "Usage: $0 {install-packages|remove-packages|reboot|copy-sources|create-link|remove-sources|mokutil-*} [args...]" >&2
