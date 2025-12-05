@@ -166,6 +166,8 @@ def run_diagnosis_wizard(sb_manager, diagnosis_label, actions_box, main_window, 
     diagnosis_label.set_markup("<i>" + i18n._("secureboot.analyzing") + "...</i>")
 
     def do_diagnosis():
+        # Vider le cache MOK pour obtenir les données à jour
+        sb_manager.clear_mok_cache()
         diag = sb_manager.diagnose_secureboot_issue()
 
         GLib.idle_add(lambda: display_diagnosis_results(

@@ -54,6 +54,12 @@ class SecureBootManager:
         self._mok_cache = None
         self._mok_cache_lock = threading.Lock()
 
+    def clear_mok_cache(self):
+        """Vide le cache MOK pour forcer une nouvelle lecture"""
+        with self._mok_cache_lock:
+            self._mok_cache = None
+            print("[DEBUG] MOK cache cleared")
+
     # ==================== Historique ====================
 
     def _save_history(self, history):
