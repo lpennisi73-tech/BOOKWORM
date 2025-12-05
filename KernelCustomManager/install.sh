@@ -85,10 +85,17 @@ echo ""
 echo "✅ Dépendances installées"
 echo ""
 
-# Rendre le script principal exécutable
+# Rendre les scripts exécutables
 chmod +x kernelcustom_manager.py 2>/dev/null || true
 chmod +x manage_kernel_sources.sh 2>/dev/null || true
 chmod +x kernelcustom-helper 2>/dev/null || true
+
+# Rendre les scripts SecureBoot exécutables
+echo "🔐 Configuration des scripts SecureBoot..."
+if [ -d "scripts/secureboot" ]; then
+    chmod +x scripts/secureboot/*.sh 2>/dev/null || true
+    echo "   ✓ Scripts SecureBoot configurés"
+fi
 
 # Installer PolicyKit et le helper
 echo "🔐 Installation du helper PolicyKit..."
