@@ -1222,6 +1222,7 @@ echo "SUCCESS"
         Diagnostique automatique des problèmes SecureBoot
         Returns: dict avec issue_type, message, solutions (list)
         """
+        print("[DEBUG] ===== Starting SecureBoot diagnosis =====")
         diagnosis = {
             'issue_type': None,
             'message': '',
@@ -1229,6 +1230,7 @@ echo "SUCCESS"
         }
 
         # 1. Vérifier UEFI
+        print("[DEBUG] Step 1: Checking UEFI system...")
         if not self.is_uefi_system():
             diagnosis['issue_type'] = 'NOT_UEFI'
             diagnosis['message'] = 'System is not using UEFI. SecureBoot requires UEFI.'
@@ -1238,8 +1240,12 @@ echo "SUCCESS"
             ]
             return diagnosis
 
+        print("[DEBUG] Step 1: UEFI system OK")
+
         # 2. Vérifier statut SecureBoot
+        print("[DEBUG] Step 2: Checking SecureBoot status...")
         sb_status = self.get_secureboot_status()
+        print(f"[DEBUG] SecureBoot status: {sb_status}")
         if not sb_status['enabled']:
             diagnosis['issue_type'] = 'SB_DISABLED'
             diagnosis['message'] = 'SecureBoot is disabled in BIOS/UEFI'
@@ -1249,8 +1255,12 @@ echo "SUCCESS"
             ]
             return diagnosis
 
+        print("[DEBUG] Step 2: SecureBoot is enabled")
+
         # 3. Vérifier enrollment MOK
+        print("[DEBUG] Step 3: Checking MOK enrollment...")
         mok_status = self.check_mok_enrolled()
+        print(f"[DEBUG] MOK status: {mok_status}")
         if not mok_status['key_found']:
             if self.check_mok_pending():
                 diagnosis['issue_type'] = 'MOK_PENDING'
@@ -1268,22 +1278,36 @@ echo "SUCCESS"
                 ]
             return diagnosis
 
+        print("[DEBUG] Step 3: MOK key is enrolled")
+
         # 4. Vérifier signature des kernels custom
+        print("[DEBUG] Step 4: Checking kernel signatures...")
         custom_kernels = self.get_custom_kernels()
+        print(f"[DEBUG] diagnose_secureboot_issue: Found {len(custom_kernels)} custom kernels")
+
         if custom_kernels:
             unsigned_kernels = []
             wrong_signature_kernels = []
 
             for kernel in custom_kernels:
+                print(f"[DEBUG] Checking kernel: {kernel['kernel_version']} ({kernel['module_count']} modules)")
                 if kernel['modules']:
                     # Vérifier un module échantillon
                     sample_module = kernel['modules'][0]
+                    print(f"[DEBUG] Sample module: {sample_module}")
                     sig_info = self.check_module_signed(sample_module)
+                    print(f"[DEBUG] Signature info: {sig_info}")
 
                     if not sig_info['signed']:
                         unsigned_kernels.append(kernel['kernel_version'])
+                        print(f"[DEBUG] -> UNSIGNED kernel: {kernel['kernel_version']}")
                     elif sig_info['signer'] and 'kernelcustom' not in sig_info['signer'].lower():
                         wrong_signature_kernels.append(kernel['kernel_version'])
+                        print(f"[DEBUG] -> WRONG SIGNATURE kernel: {kernel['kernel_version']}")
+                    else:
+                        print(f"[DEBUG] -> Properly signed kernel: {kernel['kernel_version']}")
+
+            print(f"[DEBUG] Results: unsigned={len(unsigned_kernels)}, wrong_signature={len(wrong_signature_kernels)}")
 
             if unsigned_kernels or wrong_signature_kernels:
                 diagnosis['issue_type'] = 'MODULES_NOT_SIGNED'
@@ -1292,7 +1316,10 @@ echo "SUCCESS"
                     'Re-sign all custom kernel modules (automated tool available)',
                     'Recompile kernels with "Sign for SecureBoot" option'
                 ]
+                print(f"[DEBUG] Returning MODULES_NOT_SIGNED diagnosis")
                 return diagnosis
+        else:
+            print(f"[DEBUG] No custom kernels found, skipping module signature check")
 
         # Tout est OK !
         diagnosis['issue_type'] = 'OK'
