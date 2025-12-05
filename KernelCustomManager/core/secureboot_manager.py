@@ -357,20 +357,17 @@ class SecureBootManager:
     def list_enrolled_keys(self):
         """Liste les clés MOK enrollées"""
         try:
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-list-enrolled"],
-                capture_output=True,
-                text=True,
-                check=False
-            )
+            # Utiliser le cache pour éviter de demander le mot de passe plusieurs fois
+            mok_data = self._fetch_mok_data()
+            output = mok_data['enrolled_output']
 
-            if result.returncode == 0:
-                keys = self._parse_mok_list(result.stdout)
-                return {'success': True, 'keys': keys, 'raw_output': result.stdout}
+            if output:
+                keys = self._parse_mok_list(output)
+                return {'success': True, 'keys': keys, 'raw_output': output}
             else:
-                return {'success': False, 'error': result.stderr, 'keys': []}
-        except FileNotFoundError:
-            return {'success': False, 'error': 'mokutil is not installed', 'keys': []}
+                return {'success': False, 'error': 'Unable to fetch MOK data', 'keys': []}
+        except Exception as e:
+            return {'success': False, 'error': str(e), 'keys': []}
 
     def _parse_mok_list(self, output):
         """Parse la sortie de mokutil --list-enrolled"""
@@ -401,23 +398,17 @@ class SecureBootManager:
     def list_pending_keys(self):
         """Liste les clés en attente d'enrollment"""
         try:
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-list-new"],
-                capture_output=True,
-                text=True,
-                check=False
-            )
+            # Utiliser le cache pour éviter de demander le mot de passe plusieurs fois
+            mok_data = self._fetch_mok_data()
+            output = mok_data['pending_output']
 
-            if result.returncode == 0:
-                if "MokNew is empty" in result.stdout:
-                    return {'success': True, 'keys': [], 'message': 'No pending keys'}
-                else:
-                    keys = self._parse_mok_list(result.stdout)
-                    return {'success': True, 'keys': keys, 'raw_output': result.stdout}
+            if "MokNew is empty" in output or not output:
+                return {'success': True, 'keys': [], 'message': 'No pending keys'}
             else:
-                return {'success': False, 'error': result.stderr, 'keys': []}
-        except FileNotFoundError:
-            return {'success': False, 'error': 'mokutil is not installed', 'keys': []}
+                keys = self._parse_mok_list(output)
+                return {'success': True, 'keys': keys, 'raw_output': output}
+        except Exception as e:
+            return {'success': False, 'error': str(e), 'keys': []}
 
     def import_mok_key(self, key_file):
         """
