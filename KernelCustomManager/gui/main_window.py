@@ -8,6 +8,7 @@ from gi.repository import Gtk
 from pathlib import Path
 
 from core.kernel_manager import KernelManager
+from core.secureboot_manager import SecureBootManager
 from utils.dialogs import DialogHelper
 from utils.i18n import get_i18n
 
@@ -22,6 +23,7 @@ class KernelManagerWindow(Gtk.Window):
         self.set_border_width(10)
 
         self.kernel_manager = KernelManager()
+        self.secureboot_manager = SecureBootManager()
         self.dialogs = DialogHelper(self)
         
         # Icône

@@ -68,7 +68,7 @@ def show_compile_dialog(main_window):
     content.pack_start(fakeroot_check, False, False, 0)
 
     # SecureBoot signing option
-    sb_manager = SecureBootManager()
+    sb_manager = main_window.secureboot_manager
     secureboot_check = None
 
     if sb_manager.should_prompt_for_signing():
@@ -128,7 +128,7 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
     # Préparer les variables pour la signature SecureBoot
     signing_script = ""
     if sign_for_secureboot:
-        sb_manager = SecureBootManager()
+        sb_manager = main_window.secureboot_manager
         keys_dir = sb_manager.keys_dir
         available_keys = list(keys_dir.glob("*.priv"))
 

@@ -18,8 +18,8 @@ def create_secureboot_tab(main_window):
     """Crée l'onglet de gestion SecureBoot"""
     i18n = get_i18n()
 
-    # Initialiser le SecureBoot manager
-    sb_manager = SecureBootManager()
+    # Utiliser l'instance partagée du SecureBoot manager
+    sb_manager = main_window.secureboot_manager
 
     # Container principal avec notebook (onglets internes)
     main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
