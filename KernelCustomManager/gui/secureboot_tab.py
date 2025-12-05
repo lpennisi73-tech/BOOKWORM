@@ -479,16 +479,26 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
 
                     GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_vmlinuz_for") + f" {kernel_ver}...")
 
+                    print(f"[DEBUG GUI] Calling sign_vmlinuz for {kernel_ver}")
                     vmlinuz_result = sb_manager.sign_vmlinuz(kernel_ver, progress_callback=update_vmlinuz_progress)
+                    print(f"[DEBUG GUI] vmlinuz_result = {vmlinuz_result}")
 
                     if vmlinuz_result['success']:
+                        print(f"[DEBUG GUI] vmlinuz signed successfully")
                         total_vmlinuz_signed += 1
                     else:
+                        print(f"[DEBUG GUI] vmlinuz signing failed: {vmlinuz_result.get('message', 'Unknown error')}")
                         total_vmlinuz_failed += 1
 
                     current_task += 1
 
             # Afficher résultat final
+            print(f"[DEBUG GUI] Final results:")
+            print(f"  modules_signed: {total_modules_signed}")
+            print(f"  modules_failed: {total_modules_failed}")
+            print(f"  vmlinuz_signed: {total_vmlinuz_signed}")
+            print(f"  vmlinuz_failed: {total_vmlinuz_failed}")
+
             GLib.idle_add(lambda: show_signing_results(
                 main_window, total_modules_signed, total_modules_failed,
                 total_vmlinuz_signed, total_vmlinuz_failed, i18n
