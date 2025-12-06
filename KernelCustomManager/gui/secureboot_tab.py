@@ -180,13 +180,39 @@ def run_diagnosis_wizard(sb_manager, diagnosis_label, actions_box, main_window, 
 
 
 def display_diagnosis_results(diag, diagnosis_label, actions_box, sb_manager, main_window, i18n):
-    """Affiche les résultats du diagnostic"""
+    """Affiche les résultats du diagnostic (VERSION AMÉLIORÉE)"""
 
     # Afficher le message
     if diag['issue_type'] == 'OK':
         diagnosis_label.set_markup(f"<span color='green'><b>✅ {diag['message']}</b></span>")
     elif diag['issue_type'] in ['NOT_UEFI', 'SB_DISABLED']:
         diagnosis_label.set_markup(f"<span color='orange'><b>⚠️ {diag['message']}</b></span>")
+    elif diag['issue_type'] == 'KERNEL_SIGNATURE_ISSUES':
+        # Afficher les détails des problèmes de signature
+        details = diag.get('details', {})
+        kernels = details.get('kernels', [])
+
+        message_lines = ["<span color='red'><b>❌ Signature issues detected:</b></span>\n"]
+
+        for kernel_info in kernels:
+            kernel_ver = kernel_info['kernel_version']
+            message_lines.append(f"\n<b>Kernel {kernel_ver}:</b>")
+
+            for issue in kernel_info['issues']:
+                issue_type = issue['type']
+                issue_msg = issue['message']
+
+                if issue_type == 'MODULES_UNSIGNED':
+                    icon = "📦"
+                    message_lines.append(f"  {icon} Modules: {issue_msg}")
+                elif issue_type == 'INITRD_UNSIGNED_MODULES':
+                    icon = "💾"
+                    message_lines.append(f"  {icon} Initrd: {issue_msg}")
+                elif issue_type == 'VMLINUZ_UNSIGNED':
+                    icon = "🔧"
+                    message_lines.append(f"  {icon} vmlinuz: {issue_msg}")
+
+        diagnosis_label.set_markup('\n'.join(message_lines))
     else:
         diagnosis_label.set_markup(f"<span color='red'><b>❌ {diag['message']}</b></span>")
 
@@ -207,7 +233,7 @@ def display_diagnosis_results(diag, diagnosis_label, actions_box, sb_manager, ma
             ))
             hbox.pack_start(btn, False, False, 0)
 
-        elif diag['issue_type'] == 'MODULES_NOT_SIGNED' and i == 1:
+        elif diag['issue_type'] in ['MODULES_NOT_SIGNED', 'KERNEL_SIGNATURE_ISSUES'] and i == 1:
             btn = Gtk.Button(label="▶️ " + i18n._("secureboot.start_signing"))
             btn.connect("clicked", lambda w: start_module_signing_wizard(
                 sb_manager, main_window, i18n

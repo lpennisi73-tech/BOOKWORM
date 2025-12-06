@@ -1369,20 +1369,229 @@ echo "SUCCESS"
 
     # ==================== Diagnostic automatique ====================
 
+    def _check_kernel_modules_signature_stats(self, kernel_version, sample_size=20):
+        """
+        Vérifie un échantillon statistique de modules pour détecter s'ils sont signés
+        Returns: dict avec signed_count, unsigned_count, total_checked, is_signed (bool)
+        """
+        import random
+
+        kernel_dir = Path(f"/lib/modules/{kernel_version}")
+        if not kernel_dir.exists():
+            return {'signed_count': 0, 'unsigned_count': 0, 'total_checked': 0, 'is_signed': False}
+
+        # Trouver tous les modules
+        modules = []
+        for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
+            modules.extend(kernel_dir.rglob(ext))
+
+        if not modules:
+            return {'signed_count': 0, 'unsigned_count': 0, 'total_checked': 0, 'is_signed': False}
+
+        # Prendre un échantillon aléatoire
+        sample = random.sample(modules, min(sample_size, len(modules)))
+
+        signed_count = 0
+        unsigned_count = 0
+
+        for module in sample:
+            sig_info = self.check_module_signed(str(module))
+            if sig_info['signed']:
+                signed_count += 1
+            else:
+                unsigned_count += 1
+
+        total_checked = len(sample)
+        # Considérer comme signé si au moins 95% des modules sont signés
+        is_signed = (signed_count / total_checked) >= 0.95 if total_checked > 0 else False
+
+        return {
+            'signed_count': signed_count,
+            'unsigned_count': unsigned_count,
+            'total_checked': total_checked,
+            'is_signed': is_signed,
+            'total_modules': len(modules)
+        }
+
+    def _check_initrd_modules_signed(self, kernel_version):
+        """
+        Vérifie si l'initrd contient des modules signés
+        Returns: dict avec success, initrd_ok, message
+        """
+        import tempfile
+        import subprocess
+
+        initrd_path = Path(f"/boot/initrd.img-{kernel_version}")
+        if not initrd_path.exists():
+            return {
+                'success': False,
+                'initrd_ok': None,
+                'message': f'Initrd not found: {initrd_path}'
+            }
+
+        try:
+            # Créer un répertoire temporaire
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+
+                # Extraire l'initrd
+                # unmkinitramfs extrait l'initrd dans un répertoire
+                result = subprocess.run(
+                    ['unmkinitramfs', str(initrd_path), str(tmpdir_path)],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+
+                if result.returncode != 0:
+                    # Si unmkinitramfs échoue, essayer avec cpio
+                    result2 = subprocess.run(
+                        f'cd {tmpdir_path} && zcat {initrd_path} | cpio -id 2>/dev/null',
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+                    if result2.returncode != 0:
+                        return {
+                            'success': False,
+                            'initrd_ok': None,
+                            'message': 'Failed to extract initrd'
+                        }
+
+                # Chercher des modules dans l'initrd
+                modules_in_initrd = []
+                for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
+                    modules_in_initrd.extend(tmpdir_path.rglob(ext))
+
+                if not modules_in_initrd:
+                    # Pas de modules dans l'initrd - c'est OK (certains kernels n'en ont pas)
+                    return {
+                        'success': True,
+                        'initrd_ok': True,
+                        'message': 'No modules in initrd (OK)'
+                    }
+
+                # Vérifier un échantillon de modules dans l'initrd
+                import random
+                sample = random.sample(modules_in_initrd, min(10, len(modules_in_initrd)))
+
+                signed_count = 0
+                for module in sample:
+                    # Décompresser si nécessaire
+                    module_to_check = module
+                    temp_decompressed = None
+
+                    if module.suffix == '.xz':
+                        temp_decompressed = module.parent / module.stem
+                        subprocess.run(['xz', '-d', '-k', str(module)], capture_output=True, check=False)
+                        module_to_check = temp_decompressed
+                    elif module.suffix == '.gz':
+                        temp_decompressed = module.parent / module.stem
+                        subprocess.run(['gzip', '-d', '-k', str(module)], capture_output=True, check=False)
+                        module_to_check = temp_decompressed
+                    elif module.suffix == '.zst':
+                        temp_decompressed = module.parent / module.stem
+                        subprocess.run(['zstd', '-d', '-q', str(module), '-o', str(temp_decompressed)], capture_output=True, check=False)
+                        module_to_check = temp_decompressed
+
+                    sig_info = self.check_module_signed(str(module_to_check))
+                    if sig_info['signed']:
+                        signed_count += 1
+
+                    # Nettoyer le fichier temporaire
+                    if temp_decompressed and temp_decompressed.exists():
+                        temp_decompressed.unlink()
+
+                # Si moins de 50% des modules sont signés, l'initrd a un problème
+                initrd_ok = (signed_count / len(sample)) >= 0.5 if len(sample) > 0 else False
+
+                return {
+                    'success': True,
+                    'initrd_ok': initrd_ok,
+                    'message': f'Initrd modules checked: {signed_count}/{len(sample)} signed',
+                    'modules_count': len(modules_in_initrd),
+                    'signed_count': signed_count,
+                    'checked_count': len(sample)
+                }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'initrd_ok': None,
+                'message': f'Error checking initrd: {str(e)}'
+            }
+
+    def _check_vmlinuz_signed(self, kernel_version):
+        """
+        Vérifie si vmlinuz est signé
+        Returns: dict avec success, is_signed, message
+        """
+        vmlinuz_path = self._find_vmlinuz_for_kernel(kernel_version)
+
+        if not vmlinuz_path:
+            return {
+                'success': False,
+                'is_signed': None,
+                'message': f'vmlinuz not found for {kernel_version}'
+            }
+
+        # Vérifier si sbverify est disponible
+        if not self._check_command('sbverify'):
+            return {
+                'success': False,
+                'is_signed': None,
+                'message': 'sbverify not installed, cannot verify vmlinuz signature'
+            }
+
+        # Vérifier avec la clé MOK
+        mok_cert = self.keys_dir / "MOK.pem"
+        if not mok_cert.exists():
+            return {
+                'success': False,
+                'is_signed': None,
+                'message': 'MOK certificate not found'
+            }
+
+        try:
+            result = subprocess.run(
+                ['sbverify', '--cert', str(mok_cert), str(vmlinuz_path)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+
+            is_signed = result.returncode == 0
+
+            return {
+                'success': True,
+                'is_signed': is_signed,
+                'message': 'Signed' if is_signed else 'Not signed',
+                'vmlinuz_path': str(vmlinuz_path)
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'is_signed': None,
+                'message': f'Error verifying vmlinuz: {str(e)}'
+            }
+
     def diagnose_secureboot_issue(self):
         """
-        Diagnostique automatique des problèmes SecureBoot
-        Returns: dict avec issue_type, message, solutions (list)
+        Diagnostique automatique des problèmes SecureBoot (VERSION AMÉLIORÉE)
+        Vérifie de manière fiable les modules, l'initrd et vmlinuz
+        Returns: dict avec issue_type, message, solutions (list), details (dict)
         """
-        print("[DEBUG] ===== Starting SecureBoot diagnosis =====")
+        logging.info("===== Starting SecureBoot diagnosis (improved) =====")
         diagnosis = {
             'issue_type': None,
             'message': '',
-            'solutions': []
+            'solutions': [],
+            'details': {}
         }
 
         # 1. Vérifier UEFI
-        print("[DEBUG] Step 1: Checking UEFI system...")
+        logging.debug("Step 1: Checking UEFI system...")
         if not self.is_uefi_system():
             diagnosis['issue_type'] = 'NOT_UEFI'
             diagnosis['message'] = 'System is not using UEFI. SecureBoot requires UEFI.'
@@ -1392,12 +1601,12 @@ echo "SUCCESS"
             ]
             return diagnosis
 
-        print("[DEBUG] Step 1: UEFI system OK")
+        logging.debug("Step 1: UEFI system OK")
 
         # 2. Vérifier statut SecureBoot
-        print("[DEBUG] Step 2: Checking SecureBoot status...")
+        logging.debug("Step 2: Checking SecureBoot status...")
         sb_status = self.get_secureboot_status()
-        print(f"[DEBUG] SecureBoot status: {sb_status}")
+        logging.debug(f"SecureBoot status: {sb_status}")
         if not sb_status['enabled']:
             diagnosis['issue_type'] = 'SB_DISABLED'
             diagnosis['message'] = 'SecureBoot is disabled in BIOS/UEFI'
@@ -1407,12 +1616,12 @@ echo "SUCCESS"
             ]
             return diagnosis
 
-        print("[DEBUG] Step 2: SecureBoot is enabled")
+        logging.debug("Step 2: SecureBoot is enabled")
 
         # 3. Vérifier enrollment MOK
-        print("[DEBUG] Step 3: Checking MOK enrollment...")
+        logging.debug("Step 3: Checking MOK enrollment...")
         mok_status = self.check_mok_enrolled()
-        print(f"[DEBUG] MOK status: {mok_status}")
+        logging.debug(f"MOK status: {mok_status}")
         if not mok_status['key_found']:
             if self.check_mok_pending():
                 diagnosis['issue_type'] = 'MOK_PENDING'
@@ -1430,34 +1639,92 @@ echo "SUCCESS"
                 ]
             return diagnosis
 
-        print("[DEBUG] Step 3: MOK key is enrolled")
+        logging.debug("Step 3: MOK key is enrolled")
 
-        # 4. Vérifier signature des kernels custom
-        # DÉSACTIVÉ: Cette vérification cause trop de faux positifs car:
-        # - L'initrd peut contenir des modules non signés même si /lib/modules/ est signé
-        # - La vérification se fait sur un seul module échantillon (peut être incorrect)
-        # - Cause confusion si kernels signés mais initrd pas régénéré
-        # L'utilisateur doit manuellement re-signer les kernels via l'onglet Signing si besoin
-        print("[DEBUG] Step 4: Skipping kernel signature check (disabled)")
+        # 4. Vérifier signature des kernels custom (VERSION AMÉLIORÉE)
+        logging.debug("Step 4: Checking custom kernel signatures (improved method)...")
+        custom_kernels = self.get_custom_kernels()
 
-        # Code original commenté:
-        # custom_kernels = self.get_custom_kernels()
-        # if custom_kernels:
-        #     unsigned_kernels = []
-        #     wrong_signature_kernels = []
-        #     for kernel in custom_kernels:
-        #         if kernel['modules']:
-        #             sample_module = kernel['modules'][0]
-        #             sig_info = self.check_module_signed(sample_module)
-        #             if not sig_info['signed']:
-        #                 unsigned_kernels.append(kernel['kernel_version'])
-        #     if unsigned_kernels or wrong_signature_kernels:
-        #         diagnosis['issue_type'] = 'MODULES_NOT_SIGNED'
-        #         return diagnosis
+        if custom_kernels:
+            kernels_with_issues = []
+
+            for kernel in custom_kernels:
+                kernel_ver = kernel['kernel_version']
+                logging.debug(f"Checking kernel: {kernel_ver}")
+
+                kernel_issues = []
+
+                # 4a. Vérifier les modules dans /lib/modules/ (échantillon statistique)
+                modules_stats = self._check_kernel_modules_signature_stats(kernel_ver)
+                logging.debug(f"  Modules stats: {modules_stats}")
+
+                if not modules_stats['is_signed'] and modules_stats['total_modules'] > 0:
+                    kernel_issues.append({
+                        'type': 'MODULES_UNSIGNED',
+                        'message': f"Modules not signed ({modules_stats['signed_count']}/{modules_stats['total_checked']} signed in sample)",
+                        'details': modules_stats
+                    })
+
+                # 4b. Vérifier l'initrd (optionnel - ne bloque pas si échec d'extraction)
+                initrd_check = self._check_initrd_modules_signed(kernel_ver)
+                logging.debug(f"  Initrd check: {initrd_check}")
+
+                # Seulement signaler un problème si l'extraction a réussi ET que les modules ne sont pas signés
+                if initrd_check['success'] and not initrd_check['initrd_ok'] and initrd_check.get('modules_count', 0) > 0:
+                    kernel_issues.append({
+                        'type': 'INITRD_UNSIGNED_MODULES',
+                        'message': f"Initrd contains unsigned modules ({initrd_check.get('signed_count', 0)}/{initrd_check.get('checked_count', 0)} signed)",
+                        'details': initrd_check
+                    })
+                elif not initrd_check['success']:
+                    # L'extraction a échoué - juste logger, ne pas bloquer
+                    logging.warning(f"  Initrd verification skipped: {initrd_check['message']}")
+
+                # 4c. Vérifier vmlinuz (si architecture supportée)
+                if self._is_vmlinuz_signing_supported():
+                    vmlinuz_check = self._check_vmlinuz_signed(kernel_ver)
+                    logging.debug(f"  vmlinuz check: {vmlinuz_check}")
+
+                    if vmlinuz_check['success'] and not vmlinuz_check['is_signed']:
+                        kernel_issues.append({
+                            'type': 'VMLINUZ_UNSIGNED',
+                            'message': f"vmlinuz not signed",
+                            'details': vmlinuz_check
+                        })
+
+                if kernel_issues:
+                    kernels_with_issues.append({
+                        'kernel_version': kernel_ver,
+                        'issues': kernel_issues
+                    })
+
+            # Si des problèmes ont été détectés
+            if kernels_with_issues:
+                diagnosis['issue_type'] = 'KERNEL_SIGNATURE_ISSUES'
+                diagnosis['details'] = {'kernels': kernels_with_issues}
+
+                # Message détaillé
+                messages = []
+                for k in kernels_with_issues:
+                    messages.append(f"Kernel {k['kernel_version']}:")
+                    for issue in k['issues']:
+                        messages.append(f"  - {issue['message']}")
+
+                diagnosis['message'] = '\n'.join(messages)
+
+                # Solutions
+                diagnosis['solutions'] = [
+                    'Sign kernel modules and vmlinuz (use Signing tab)',
+                    'Regenerate initrd after signing modules',
+                    'Verify SecureBoot configuration'
+                ]
+
+                return diagnosis
 
         # Tout est OK !
+        logging.info("Step 4: All kernels properly signed")
         diagnosis['issue_type'] = 'OK'
-        diagnosis['message'] = 'SecureBoot is properly configured'
+        diagnosis['message'] = 'SecureBoot is properly configured. All custom kernels are signed.'
         diagnosis['solutions'] = []
         return diagnosis
 
