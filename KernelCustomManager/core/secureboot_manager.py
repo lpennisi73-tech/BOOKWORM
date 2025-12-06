@@ -1582,3 +1582,280 @@ echo "SUCCESS"
             'signed_count': signed_count,
             'failed_modules': failed_modules
         }
+
+    def sign_kernel_complete(self, kernel_version, sign_vmlinuz_flag=True, progress_callback=None):
+        """
+        Signe les modules ET vmlinuz d'un kernel dans une seule session pkexec
+        (évite de redemander le mot de passe entre les deux étapes)
+
+        Args:
+            kernel_version: Version du kernel
+            sign_vmlinuz_flag: Si True, signe aussi vmlinuz
+            progress_callback: Fonction appelée pour suivre le progrès (current, total, module_name)
+
+        Returns: dict avec success, message, modules_signed, modules_failed, vmlinuz_signed
+        """
+        logging.info(f"=== Complete signing for kernel {kernel_version} (vmlinuz={sign_vmlinuz_flag}) ===")
+
+        mok_priv = self.keys_dir / "MOK.priv"
+        mok_cert_der = self.keys_dir / "MOK.der"
+        mok_cert_pem = self.keys_dir / "MOK.pem"
+
+        if not mok_priv.exists() or not mok_cert_der.exists():
+            return {
+                'success': False,
+                'message': 'MOK keys not found',
+                'modules_signed': 0,
+                'modules_failed': 0,
+                'vmlinuz_signed': False
+            }
+
+        # Trouver sign-file
+        sign_file = self._find_sign_file_tool()
+        if not sign_file:
+            return {
+                'success': False,
+                'message': 'sign-file tool not found',
+                'modules_signed': 0,
+                'modules_failed': 0,
+                'vmlinuz_signed': False
+            }
+
+        # Trouver les modules
+        kernel_dir = Path(f"/lib/modules/{kernel_version}")
+        if not kernel_dir.exists():
+            return {
+                'success': False,
+                'message': f'Kernel directory not found: {kernel_dir}',
+                'modules_signed': 0,
+                'modules_failed': 0,
+                'vmlinuz_signed': False
+            }
+
+        # Trouver vmlinuz si nécessaire
+        vmlinuz_path = None
+        if sign_vmlinuz_flag:
+            # Vérifier si architecture supporte vmlinuz signing
+            if not self._is_vmlinuz_signing_supported():
+                logging.warning(f"vmlinuz signing not supported on {platform.machine()}")
+                sign_vmlinuz_flag = False
+            else:
+                vmlinuz_path = self._find_vmlinuz_for_kernel(kernel_version)
+                if not vmlinuz_path:
+                    logging.warning(f"vmlinuz not found for {kernel_version}, skipping vmlinuz signing")
+                    sign_vmlinuz_flag = False
+                elif not self._check_command('sbsign'):
+                    logging.warning("sbsign not installed, skipping vmlinuz signing")
+                    sign_vmlinuz_flag = False
+
+        # Compter les modules
+        modules = []
+        for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
+            modules.extend(kernel_dir.rglob(ext))
+        total_modules = len(modules)
+        logging.info(f"Found {total_modules} modules to sign")
+
+        # Créer un script bash unique qui signe modules + vmlinuz
+        import tempfile
+
+        script_content = f"""#!/bin/bash
+
+SIGN_FILE="{sign_file}"
+MOK_PRIV="{mok_priv.resolve()}"
+MOK_CERT_DER="{mok_cert_der.resolve()}"
+MOK_CERT_PEM="{mok_cert_pem.resolve()}"
+KERNEL_DIR="{kernel_dir}"
+TOTAL_MODULES={total_modules}
+
+signed_modules=0
+failed_modules=0
+current=0
+
+# Fonction pour signer un module (gère la compression)
+sign_module() {{
+    local module="$1"
+    local compressed=false
+    local compression_type=""
+    local ko_file="$module"
+
+    # Détecter le type de compression
+    if [[ "$module" == *.ko.xz ]]; then
+        compressed=true
+        compression_type="xz"
+        ko_file="${{module%.xz}}"
+        xz -d -k "$module" 2>/dev/null || return 1
+    elif [[ "$module" == *.ko.gz ]]; then
+        compressed=true
+        compression_type="gz"
+        ko_file="${{module%.gz}}"
+        gzip -d -k "$module" 2>/dev/null || return 1
+    elif [[ "$module" == *.ko.zst ]]; then
+        compressed=true
+        compression_type="zst"
+        ko_file="${{module%.zst}}"
+        zstd -d -q "$module" -o "$ko_file" 2>/dev/null || return 1
+    fi
+
+    # Signer le module .ko
+    if "$SIGN_FILE" sha256 "$MOK_PRIV" "$MOK_CERT_DER" "$ko_file" 2>/dev/null; then
+        # Si le module était compressé, le recompresser
+        if [ "$compressed" = true ]; then
+            case "$compression_type" in
+                xz)
+                    rm -f "$module"
+                    xz -z -k "$ko_file" 2>/dev/null
+                    rm -f "$ko_file"
+                    ;;
+                gz)
+                    rm -f "$module"
+                    gzip -c "$ko_file" > "$module" 2>/dev/null
+                    rm -f "$ko_file"
+                    ;;
+                zst)
+                    rm -f "$module"
+                    zstd -q "$ko_file" -o "$module" 2>/dev/null
+                    rm -f "$ko_file"
+                    ;;
+            esac
+        fi
+        return 0
+    else
+        # Nettoyer en cas d'échec
+        [ "$compressed" = true ] && [ -f "$ko_file" ] && rm -f "$ko_file"
+        return 1
+    fi
+}}
+
+# Signer tous les modules
+while IFS= read -r -d '' module; do
+    ((current++))
+    module_name=$(basename "$module")
+
+    if sign_module "$module"; then
+        ((signed_modules++))
+    else
+        ((failed_modules++))
+    fi
+
+    # Afficher la progression
+    echo "PROGRESS_MODULE:$current:$TOTAL_MODULES:$module_name"
+done < <(find "$KERNEL_DIR" \\( -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.gz" -o -name "*.ko.zst" \\) -print0)
+
+echo "MODULES_SIGNED:$signed_modules"
+echo "MODULES_FAILED:$failed_modules"
+"""
+
+        # Ajouter la signature de vmlinuz si nécessaire
+        if sign_vmlinuz_flag and vmlinuz_path:
+            script_content += f"""
+# Signer vmlinuz
+VMLINUZ="{vmlinuz_path.resolve()}"
+vmlinuz_signed=0
+
+echo "PROGRESS_VMLINUZ:signing"
+
+# Créer backup si nécessaire
+if [ ! -f "${{VMLINUZ}}.unsigned" ]; then
+    cp "$VMLINUZ" "${{VMLINUZ}}.unsigned"
+fi
+
+# Signer l'image
+if sbsign --key "$MOK_PRIV" --cert "$MOK_CERT_PEM" --output "${{VMLINUZ}}.signed" "$VMLINUZ" 2>&1; then
+    mv "${{VMLINUZ}}.signed" "$VMLINUZ"
+    vmlinuz_signed=1
+    echo "VMLINUZ_SIGNED:1"
+else
+    echo "VMLINUZ_SIGNED:0"
+fi
+"""
+        else:
+            script_content += """
+echo "VMLINUZ_SIGNED:0"
+"""
+
+        # Créer le script temporaire
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as tf:
+            tf.write(script_content)
+            script_path = tf.name
+
+        logging.debug(f"Created unified signing script: {script_path}")
+        os.chmod(script_path, 0o755)
+
+        # Exécuter avec pkexec et suivre la progression
+        logging.info("Executing unified signing with pkexec (one password prompt only)...")
+
+        process = subprocess.Popen(
+            ["pkexec", "bash", script_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+
+        # Lire la sortie en temps réel
+        stdout_lines = []
+        modules_signed = 0
+        modules_failed = 0
+        vmlinuz_signed = False
+
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                line = line.strip()
+                stdout_lines.append(line)
+
+                # Parser la progression des modules
+                if line.startswith('PROGRESS_MODULE:'):
+                    parts = line.split(':')
+                    current = int(parts[1])
+                    total = int(parts[2])
+                    module_name = parts[3] if len(parts) > 3 else ""
+                    if progress_callback:
+                        progress_callback(current, total, module_name)
+                    logging.debug(f"Module progress: {current}/{total} - {module_name}")
+
+                # Parser la progression vmlinuz
+                elif line.startswith('PROGRESS_VMLINUZ:'):
+                    if progress_callback:
+                        progress_callback(total_modules, total_modules, "vmlinuz")
+                    logging.debug("Signing vmlinuz...")
+
+                # Parser les résultats
+                elif line.startswith('MODULES_SIGNED:'):
+                    modules_signed = int(line.split(':')[1])
+                elif line.startswith('MODULES_FAILED:'):
+                    modules_failed = int(line.split(':')[1])
+                elif line.startswith('VMLINUZ_SIGNED:'):
+                    vmlinuz_signed = (line.split(':')[1] == '1')
+
+        process.wait()
+
+        # Nettoyer
+        try:
+            os.unlink(script_path)
+        except:
+            pass
+
+        success = (modules_failed == 0) and (not sign_vmlinuz_flag or vmlinuz_signed)
+
+        logging.info(f"Complete signing finished: modules={modules_signed}/{total_modules}, vmlinuz={vmlinuz_signed}")
+
+        self.add_to_history(
+            "Complete Kernel Signing",
+            f"Kernel {kernel_version}: {modules_signed} modules signed, vmlinuz={'✅' if vmlinuz_signed else '❌'}",
+            success=success
+        )
+
+        message = f'Signed {modules_signed}/{total_modules} modules'
+        if sign_vmlinuz_flag:
+            message += f', vmlinuz: {"✅" if vmlinuz_signed else "❌"}'
+
+        return {
+            'success': success,
+            'message': message,
+            'modules_signed': modules_signed,
+            'modules_failed': modules_failed,
+            'vmlinuz_signed': vmlinuz_signed
+        }

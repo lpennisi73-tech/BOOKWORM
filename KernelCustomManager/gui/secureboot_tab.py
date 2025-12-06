@@ -452,51 +452,40 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
             total_vmlinuz_signed = 0
             total_vmlinuz_failed = 0
 
-            total_tasks = len(selected_kernels) * (2 if sign_vmlinuz else 1)
+            # Avec sign_kernel_complete, une seule tâche par kernel (modules + vmlinuz en une fois)
+            total_tasks = len(selected_kernels)
             current_task = 0
 
             for kernel_ver in selected_kernels:
-                # Signer les modules
-                def update_module_progress(current, total, module_name):
-                    fraction = (current_task + (current / total)) / total_tasks
-                    text = f"[{current_task + 1}/{total_tasks}] {kernel_ver}: {current}/{total} modules"
+                # Signer modules ET vmlinuz dans une seule session pkexec (évite double mot de passe)
+                def update_progress(current, total, module_name):
+                    fraction = (current_task + (current / total)) / total_tasks if total > 0 else 1.0
+                    text = f"[{current_task + 1}/{total_tasks}] {kernel_ver}: {current}/{total}"
                     GLib.idle_add(progress.set_fraction, fraction)
                     GLib.idle_add(progress.set_text, text)
-                    # Afficher le module en cours dans le status_label au centre de la fenêtre
+                    # Afficher le module/étape en cours dans le status_label
                     if module_name:
-                        GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...\n📦 {module_name}")
+                        if module_name == "vmlinuz":
+                            GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_vmlinuz_for") + f" {kernel_ver}...")
+                        else:
+                            GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...\n📦 {module_name}")
 
-                result = sb_manager.resign_kernel_modules(
+                print(f"[DEBUG GUI] Calling sign_kernel_complete for {kernel_ver} (sign_vmlinuz={sign_vmlinuz})")
+                result = sb_manager.sign_kernel_complete(
                     kernel_ver,
-                    progress_callback=update_module_progress
+                    sign_vmlinuz_flag=sign_vmlinuz,
+                    progress_callback=update_progress
                 )
+                print(f"[DEBUG GUI] result = {result}")
 
-                total_modules_signed += result['signed_count']
-                total_modules_failed += result['failed_count']
+                total_modules_signed += result['modules_signed']
+                total_modules_failed += result['modules_failed']
+                if result['vmlinuz_signed']:
+                    total_vmlinuz_signed += 1
+                elif sign_vmlinuz:
+                    total_vmlinuz_failed += 1
+
                 current_task += 1
-
-                # Signer vmlinuz si demandé
-                if sign_vmlinuz:
-                    def update_vmlinuz_progress(current, total, step):
-                        fraction = (current_task + (current / total)) / total_tasks
-                        text = f"[{current_task + 1}/{total_tasks}] vmlinuz-{kernel_ver}: {step}"
-                        GLib.idle_add(progress.set_fraction, fraction)
-                        GLib.idle_add(progress.set_text, text)
-
-                    GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_vmlinuz_for") + f" {kernel_ver}...")
-
-                    print(f"[DEBUG GUI] Calling sign_vmlinuz for {kernel_ver}")
-                    vmlinuz_result = sb_manager.sign_vmlinuz(kernel_ver, progress_callback=update_vmlinuz_progress)
-                    print(f"[DEBUG GUI] vmlinuz_result = {vmlinuz_result}")
-
-                    if vmlinuz_result['success']:
-                        print(f"[DEBUG GUI] vmlinuz signed successfully")
-                        total_vmlinuz_signed += 1
-                    else:
-                        print(f"[DEBUG GUI] vmlinuz signing failed: {vmlinuz_result.get('message', 'Unknown error')}")
-                        total_vmlinuz_failed += 1
-
-                    current_task += 1
 
             # Afficher résultat final
             print(f"[DEBUG GUI] Final results:")
