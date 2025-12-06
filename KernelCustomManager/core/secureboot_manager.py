@@ -768,8 +768,10 @@ class SecureBootManager:
 
         for kernel_dir in modules_dir.iterdir():
             if kernel_dir.is_dir() and "kernelcustom" in kernel_dir.name.lower():
-                # Compter les modules
-                modules = list(kernel_dir.rglob("*.ko"))
+                # Compter les modules (incluant les modules compressés)
+                modules = []
+                for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
+                    modules.extend(kernel_dir.rglob(ext))
 
                 custom_kernels.append({
                     'kernel_version': kernel_dir.name,
@@ -866,7 +868,10 @@ class SecureBootManager:
                 'errors': []
             }
 
-        modules = list(kernel_dir.rglob("*.ko"))
+        # Trouver tous les modules (incluant les modules compressés)
+        modules = []
+        for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
+            modules.extend(kernel_dir.rglob(ext))
         total = len(modules)
         logging.info(f"Found {total} modules to sign")
 
@@ -889,11 +894,66 @@ signed=0
 failed=0
 current=0
 
-# Trouver et signer tous les modules
+# Fonction pour signer un module (gère la compression)
+sign_module() {{
+    local module="$1"
+    local compressed=false
+    local compression_type=""
+    local ko_file="$module"
+
+    # Détecter le type de compression
+    if [[ "$module" == *.ko.xz ]]; then
+        compressed=true
+        compression_type="xz"
+        ko_file="${{module%.xz}}"
+        xz -d -k "$module" 2>/dev/null || return 1
+    elif [[ "$module" == *.ko.gz ]]; then
+        compressed=true
+        compression_type="gz"
+        ko_file="${{module%.gz}}"
+        gzip -d -k "$module" 2>/dev/null || return 1
+    elif [[ "$module" == *.ko.zst ]]; then
+        compressed=true
+        compression_type="zst"
+        ko_file="${{module%.zst}}"
+        zstd -d -q "$module" -o "$ko_file" 2>/dev/null || return 1
+    fi
+
+    # Signer le module .ko
+    if "$SIGN_FILE" sha256 "$MOK_PRIV" "$MOK_CERT" "$ko_file" 2>/dev/null; then
+        # Si le module était compressé, le recompresser
+        if [ "$compressed" = true ]; then
+            case "$compression_type" in
+                xz)
+                    rm -f "$module"
+                    xz -z -k "$ko_file" 2>/dev/null
+                    rm -f "$ko_file"
+                    ;;
+                gz)
+                    rm -f "$module"
+                    gzip -c "$ko_file" > "$module" 2>/dev/null
+                    rm -f "$ko_file"
+                    ;;
+                zst)
+                    rm -f "$module"
+                    zstd -q "$ko_file" -o "$module" 2>/dev/null
+                    rm -f "$ko_file"
+                    ;;
+            esac
+        fi
+        return 0
+    else
+        # Nettoyer en cas d'échec
+        [ "$compressed" = true ] && [ -f "$ko_file" ] && rm -f "$ko_file"
+        return 1
+    fi
+}}
+
+# Trouver et signer tous les modules (incluant compressés)
 while IFS= read -r -d '' module; do
     ((current++))
 
-    if "$SIGN_FILE" sha256 "$MOK_PRIV" "$MOK_CERT" "$module" 2>/dev/null; then
+    if sign_module "$module"; then
         ((signed++))
     else
         ((failed++))
@@ -903,7 +963,7 @@ while IFS= read -r -d '' module; do
     if [ $((current % 100)) -eq 0 ] || [ $current -eq $TOTAL ]; then
         echo "PROGRESS:$current:$TOTAL"
     fi
-done < <(find "$KERNEL_DIR" -name "*.ko" -print0)
+done < <(find "$KERNEL_DIR" \\( -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.gz" -o -name "*.ko.zst" \\) -print0)
 
 echo "SIGNED:$signed"
 echo "FAILED:$failed"
