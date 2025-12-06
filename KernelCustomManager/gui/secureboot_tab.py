@@ -461,6 +461,9 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
                         text += f"\n{module_name}"
                     GLib.idle_add(progress.set_fraction, fraction)
                     GLib.idle_add(progress.set_text, text)
+                    # Afficher le module en cours dans le status_label au centre de la fenêtre
+                    if module_name:
+                        GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...\n📦 {module_name}")
 
                 GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...")
 
