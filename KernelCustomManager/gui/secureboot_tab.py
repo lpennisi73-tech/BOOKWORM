@@ -465,8 +465,6 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
                     if module_name:
                         GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...\n📦 {module_name}")
 
-                GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...")
-
                 result = sb_manager.resign_kernel_modules(
                     kernel_ver,
                     progress_callback=update_module_progress

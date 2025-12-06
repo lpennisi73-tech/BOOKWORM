@@ -965,16 +965,17 @@ sign_module() {{
 while IFS= read -r -d '' module; do
     ((current++))
 
+    # Extraire le nom du module (basename)
+    module_name=$(basename "$module")
+
     if sign_module "$module"; then
         ((signed++))
     else
         ((failed++))
     fi
 
-    # Afficher la progression tous les 100 modules
-    if [ $((current % 100)) -eq 0 ] || [ $current -eq $TOTAL ]; then
-        echo "PROGRESS:$current:$TOTAL"
-    fi
+    # Afficher la progression avec le nom du module
+    echo "PROGRESS:$current:$TOTAL:$module_name"
 done < <(find "$KERNEL_DIR" \\( -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.gz" -o -name "*.ko.zst" \\) -print0)
 
 echo "SIGNED:$signed"
@@ -1014,10 +1015,10 @@ echo "FAILED:$failed"
                     parts = line.split(':')
                     current = int(parts[1])
                     total_modules = int(parts[2])
+                    module_name = parts[3] if len(parts) > 3 else ""
                     if progress_callback:
-                        module_name = f"{current}/{total_modules}"
                         progress_callback(current, total_modules, module_name)
-                    logging.debug(f"Progress: {current}/{total_modules}")
+                    logging.debug(f"Progress: {current}/{total_modules} - {module_name}")
 
         process.wait()
 
