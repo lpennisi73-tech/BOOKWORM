@@ -661,18 +661,45 @@ def update_dependencies_display(sb_manager, label, i18n):
 
 def install_dependencies(main_window, sb_manager, deps_label, i18n):
     """Installe les dépendances manquantes"""
+    import os
+
     deps = sb_manager.check_dependencies()
 
     if deps['all_installed']:
         show_info_dialog(main_window, i18n._("secureboot.all_dependencies_installed"), i18n)
         return
 
-    # Préparer la commande d'installation
+    # Mapper les outils vers les packages Debian/Ubuntu
     packages = []
+    package_descriptions = []
+
     if not deps['dependencies']['mokutil']:
         packages.append('mokutil')
+        package_descriptions.append('mokutil (gestion des clés MOK)')
+
     if not deps['dependencies']['openssl']:
         packages.append('openssl')
+        package_descriptions.append('openssl (génération de clés)')
+
+    # sbsign et sbverify sont dans le package sbsigntool
+    if not deps['dependencies']['sbsign'] or not deps['dependencies']['sbverify']:
+        if 'sbsigntool' not in packages:
+            packages.append('sbsigntool')
+            package_descriptions.append('sbsigntool (signature UEFI)')
+
+    # sign-file est dans linux-kbuild-X.Y
+    if not deps['dependencies']['sign-file']:
+        kernel_version = os.uname().release
+        kernel_major_minor = '.'.join(kernel_version.split('.')[:2])
+        kbuild_package = f'linux-kbuild-{kernel_major_minor}'
+        packages.append(kbuild_package)
+        package_descriptions.append(f'{kbuild_package} (signature de modules)')
+
+    # modinfo est dans kmod (normalement déjà installé)
+    if not deps['dependencies']['modinfo']:
+        if 'kmod' not in packages:
+            packages.append('kmod')
+            package_descriptions.append('kmod (outils pour modules kernel)')
 
     if not packages:
         show_info_dialog(main_window, i18n._("secureboot.all_dependencies_installed"), i18n)
@@ -688,7 +715,7 @@ def install_dependencies(main_window, sb_manager, deps_label, i18n):
         buttons=Gtk.ButtonsType.YES_NO,
         text=i18n._("secureboot.install_dependencies_confirm")
     )
-    dialog.format_secondary_text(f"{i18n._('secureboot.packages')}: {', '.join(packages)}")
+    dialog.format_secondary_text(f"{i18n._('secureboot.packages')}:\n" + '\n'.join(f"  • {desc}" for desc in package_descriptions))
 
     response = dialog.run()
     dialog.destroy()
