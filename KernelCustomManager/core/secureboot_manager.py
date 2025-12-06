@@ -12,6 +12,7 @@ import shutil
 import os
 import logging
 import threading
+import platform
 
 # Configurer le logging
 log_file = Path.home() / "KernelCustomManager" / "build" / "secureboot" / "sign_debug.log"
@@ -742,6 +743,17 @@ class SecureBootManager:
 
         return result is not None
 
+    def _is_vmlinuz_signing_supported(self):
+        """
+        Vérifie si la signature vmlinuz est supportée sur cette architecture.
+        sbsign ne fonctionne que sur x86/x86_64 (PE/COFF format).
+        Sur ARM, les kernels ne sont pas au format PE/COFF.
+        """
+        arch = platform.machine().lower()
+        # Architectures supportées par sbsign (PE/COFF format)
+        supported_archs = ['x86_64', 'amd64', 'i386', 'i686']
+        return arch in supported_archs
+
     def get_system_info(self):
         """Récupère les informations système pertinentes pour SecureBoot"""
         info = {
@@ -1113,6 +1125,17 @@ echo "FAILED:$failed"
         Returns: dict avec success, message
         """
         logging.info(f"=== Starting vmlinuz signing for {kernel_version} ===")
+
+        # Vérifier si la signature vmlinuz est supportée sur cette architecture
+        if not self._is_vmlinuz_signing_supported():
+            arch = platform.machine()
+            logging.warning(f"vmlinuz signing not supported on architecture: {arch}")
+            return {
+                'success': False,
+                'message': f'vmlinuz signing not supported on {arch} architecture. '
+                          f'sbsign only works with PE/COFF format kernels (x86/x86_64). '
+                          f'ARM kernels use different boot formats. Module signing will still work.'
+            }
 
         mok_priv = self.keys_dir / "MOK.priv"
         mok_cert = self.keys_dir / "MOK.pem"
