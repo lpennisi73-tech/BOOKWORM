@@ -35,7 +35,9 @@
     "delete": "🗑️ Delete",
     "clear": "🗑️ Clear",
     "cancel": "Cancel",
-    "select": "Select"
+    "select": "Select",
+    "later": "Later",
+    "reboot_now": "Reboot Now"
   },
   "tooltip": {
     "update_stable": "Update to the latest stable version"
@@ -444,6 +446,7 @@
     "reboot_required": "A reboot is required.",
     "follow_mok_manager_instructions": "Follow MOK Manager instructions at reboot.",
     "reboot_now_question": "Do you want to reboot now?",
+    "reboot_confirm_message": "Are you sure you want to reboot now?\n\nMake sure you have saved all your work.",
     "module_signing": "Kernel Module Signing",
     "resign_custom_kernels": "Re-sign Custom Kernels",
     "no_custom_kernels": "No custom kernel detected",

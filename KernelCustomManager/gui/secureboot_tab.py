@@ -148,9 +148,9 @@ def create_wizard_tab(main_window, sb_manager, i18n):
     )
     box.pack_start(diagnose_btn, False, False, 0)
 
-    # Lancer automatiquement au chargement (sans vider le cache)
+    # Lancer automatiquement au chargement (avec vidage du cache pour obtenir l'état actuel)
     GLib.idle_add(lambda: run_diagnosis_wizard(
-        sb_manager, diagnosis_label, actions_box, main_window, i18n, clear_cache=False
+        sb_manager, diagnosis_label, actions_box, main_window, i18n, clear_cache=True
     ))
 
     return box
@@ -233,6 +233,12 @@ def display_diagnosis_results(diag, diagnosis_label, actions_box, sb_manager, ma
             ))
             hbox.pack_start(btn, False, False, 0)
 
+        elif diag['issue_type'] == 'MOK_PENDING' and i == 1:
+            # Pour l'état pending, proposer un bouton de reboot
+            btn = Gtk.Button(label="🔄 " + i18n._("button.reboot_now"))
+            btn.connect("clicked", lambda w: reboot_now(main_window, i18n))
+            hbox.pack_start(btn, False, False, 0)
+
         elif diag['issue_type'] in ['MODULES_NOT_SIGNED', 'KERNEL_SIGNATURE_ISSUES'] and i == 1:
             btn = Gtk.Button(label="▶️ " + i18n._("secureboot.start_signing"))
             btn.connect("clicked", lambda w: start_module_signing_wizard(
@@ -243,6 +249,27 @@ def display_diagnosis_results(diag, diagnosis_label, actions_box, sb_manager, ma
         actions_box.pack_start(hbox, False, False, 0)
 
     actions_box.show_all()
+
+
+def reboot_now(main_window, i18n):
+    """Lance un reboot immédiat avec confirmation"""
+    dialog = Gtk.MessageDialog(
+        transient_for=main_window,
+        flags=0,
+        message_type=Gtk.MessageType.WARNING,
+        buttons=Gtk.ButtonsType.YES_NO,
+        text="🔄 " + i18n._("button.reboot_now") + "?"
+    )
+    dialog.format_secondary_text(i18n._("secureboot.reboot_confirm_message"))
+
+    response = dialog.run()
+    dialog.destroy()
+
+    if response == Gtk.ResponseType.YES:
+        try:
+            subprocess.Popen(["pkexec", "systemctl", "reboot"])
+        except Exception as e:
+            show_error_dialog(main_window, f"Failed to reboot: {str(e)}", i18n)
 
 
 def start_mok_enrollment_wizard(sb_manager, main_window, i18n):
@@ -333,6 +360,8 @@ def start_mok_enrollment_wizard(sb_manager, main_window, i18n):
 
         if result['success']:
             dialog.destroy()
+            # Vider le cache MOK pour forcer une nouvelle lecture au prochain check
+            sb_manager.clear_mok_cache()
             # Afficher dialogue de succès avec instructions pour le reboot
             show_reboot_instructions_dialog(main_window, i18n)
         else:
@@ -348,7 +377,7 @@ def show_reboot_instructions_dialog(main_window, i18n):
         transient_for=main_window,
         flags=0,
         message_type=Gtk.MessageType.INFO,
-        buttons=Gtk.ButtonsType.OK,
+        buttons=Gtk.ButtonsType.NONE,
         text="✅ " + i18n._("secureboot.mok_key_imported")
     )
 
@@ -359,8 +388,20 @@ def show_reboot_instructions_dialog(main_window, i18n):
 {i18n._("secureboot.reboot_now_question")}"""
 
     dialog.format_secondary_text(secondary_text)
-    dialog.run()
+
+    # Ajouter des boutons pour rebooter ou annuler
+    dialog.add_button("⏸️ " + i18n._("button.later"), Gtk.ResponseType.CANCEL)
+    dialog.add_button("🔄 " + i18n._("button.reboot_now"), Gtk.ResponseType.OK)
+
+    response = dialog.run()
     dialog.destroy()
+
+    # Si l'utilisateur choisit de rebooter maintenant
+    if response == Gtk.ResponseType.OK:
+        try:
+            subprocess.Popen(["pkexec", "systemctl", "reboot"])
+        except Exception as e:
+            show_error_dialog(main_window, f"Failed to reboot: {str(e)}", i18n)
 
 
 def start_module_signing_wizard(sb_manager, main_window, i18n):
