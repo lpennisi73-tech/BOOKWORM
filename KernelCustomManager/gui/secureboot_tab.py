@@ -403,16 +403,18 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
     sign_vmlinuz_checkbox.set_active(True)
     content.pack_start(sign_vmlinuz_checkbox, False, False, 0)
 
+    # Label de statut (au centre, AVANT la progressbar)
+    status_label = Gtk.Label()
+    status_label.set_line_wrap(True)
+    status_label.set_xalign(0)
+    status_label.set_margin_top(10)
+    status_label.set_margin_bottom(10)
+    content.pack_start(status_label, False, False, 0)
+
     # Barre de progression
     progress = Gtk.ProgressBar()
     progress.set_show_text(True)
     content.pack_start(progress, False, False, 0)
-
-    # Label de statut
-    status_label = Gtk.Label()
-    status_label.set_line_wrap(True)
-    status_label.set_xalign(0)
-    content.pack_start(status_label, False, False, 0)
 
     # Boutons
     dialog.add_button("❌ " + i18n._("button.cancel"), Gtk.ResponseType.CANCEL)
@@ -457,8 +459,6 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
                 def update_module_progress(current, total, module_name):
                     fraction = (current_task + (current / total)) / total_tasks
                     text = f"[{current_task + 1}/{total_tasks}] {kernel_ver}: {current}/{total} modules"
-                    if module_name:
-                        text += f"\n{module_name}"
                     GLib.idle_add(progress.set_fraction, fraction)
                     GLib.idle_add(progress.set_text, text)
                     # Afficher le module en cours dans le status_label au centre de la fenêtre
