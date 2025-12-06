@@ -467,6 +467,8 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
                     if module_name:
                         if module_name == "vmlinuz":
                             GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_vmlinuz_for") + f" {kernel_ver}...")
+                        elif module_name == "initrd":
+                            GLib.idle_add(status_label.set_text, f"🔄 Regenerating initrd for {kernel_ver}...\n⚙️ This is required for SecureBoot to work")
                         else:
                             GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...\n📦 {module_name}")
 

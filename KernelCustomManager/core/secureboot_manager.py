@@ -1433,45 +1433,27 @@ echo "SUCCESS"
         print("[DEBUG] Step 3: MOK key is enrolled")
 
         # 4. Vérifier signature des kernels custom
-        print("[DEBUG] Step 4: Checking kernel signatures...")
-        custom_kernels = self.get_custom_kernels()
-        print(f"[DEBUG] diagnose_secureboot_issue: Found {len(custom_kernels)} custom kernels")
+        # DÉSACTIVÉ: Cette vérification cause trop de faux positifs car:
+        # - L'initrd peut contenir des modules non signés même si /lib/modules/ est signé
+        # - La vérification se fait sur un seul module échantillon (peut être incorrect)
+        # - Cause confusion si kernels signés mais initrd pas régénéré
+        # L'utilisateur doit manuellement re-signer les kernels via l'onglet Signing si besoin
+        print("[DEBUG] Step 4: Skipping kernel signature check (disabled)")
 
-        if custom_kernels:
-            unsigned_kernels = []
-            wrong_signature_kernels = []
-
-            for kernel in custom_kernels:
-                print(f"[DEBUG] Checking kernel: {kernel['kernel_version']} ({kernel['module_count']} modules)")
-                if kernel['modules']:
-                    # Vérifier un module échantillon
-                    sample_module = kernel['modules'][0]
-                    print(f"[DEBUG] Sample module: {sample_module}")
-                    sig_info = self.check_module_signed(sample_module)
-                    print(f"[DEBUG] Signature info: {sig_info}")
-
-                    if not sig_info['signed']:
-                        unsigned_kernels.append(kernel['kernel_version'])
-                        print(f"[DEBUG] -> UNSIGNED kernel: {kernel['kernel_version']}")
-                    elif sig_info['signer'] and 'kernelcustom' not in sig_info['signer'].lower():
-                        wrong_signature_kernels.append(kernel['kernel_version'])
-                        print(f"[DEBUG] -> WRONG SIGNATURE kernel: {kernel['kernel_version']}")
-                    else:
-                        print(f"[DEBUG] -> Properly signed kernel: {kernel['kernel_version']}")
-
-            print(f"[DEBUG] Results: unsigned={len(unsigned_kernels)}, wrong_signature={len(wrong_signature_kernels)}")
-
-            if unsigned_kernels or wrong_signature_kernels:
-                diagnosis['issue_type'] = 'MODULES_NOT_SIGNED'
-                diagnosis['message'] = f'Custom kernel modules are not properly signed. Unsigned: {len(unsigned_kernels)}, Wrong signature: {len(wrong_signature_kernels)}'
-                diagnosis['solutions'] = [
-                    'Re-sign all custom kernel modules (automated tool available)',
-                    'Recompile kernels with "Sign for SecureBoot" option'
-                ]
-                print(f"[DEBUG] Returning MODULES_NOT_SIGNED diagnosis")
-                return diagnosis
-        else:
-            print(f"[DEBUG] No custom kernels found, skipping module signature check")
+        # Code original commenté:
+        # custom_kernels = self.get_custom_kernels()
+        # if custom_kernels:
+        #     unsigned_kernels = []
+        #     wrong_signature_kernels = []
+        #     for kernel in custom_kernels:
+        #         if kernel['modules']:
+        #             sample_module = kernel['modules'][0]
+        #             sig_info = self.check_module_signed(sample_module)
+        #             if not sig_info['signed']:
+        #                 unsigned_kernels.append(kernel['kernel_version'])
+        #     if unsigned_kernels or wrong_signature_kernels:
+        #         diagnosis['issue_type'] = 'MODULES_NOT_SIGNED'
+        #         return diagnosis
 
         # Tout est OK !
         diagnosis['issue_type'] = 'OK'
@@ -1773,6 +1755,20 @@ fi
 echo "VMLINUZ_SIGNED:0"
 """
 
+        # IMPORTANT: Régénérer l'initrd après la signature des modules
+        # Sinon l'initrd contient les modules NON SIGNÉS et le boot échoue avec SecureBoot
+        script_content += f"""
+# Régénérer l'initrd pour inclure les modules signés
+KERNEL_VERSION="{kernel_version}"
+echo "PROGRESS_INITRD:regenerating"
+
+if update-initramfs -u -k "$KERNEL_VERSION" 2>&1; then
+    echo "INITRD_UPDATED:1"
+else
+    echo "INITRD_UPDATED:0"
+fi
+"""
+
         # Créer le script temporaire
         with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as tf:
             tf.write(script_content)
@@ -1797,6 +1793,7 @@ echo "VMLINUZ_SIGNED:0"
         modules_signed = 0
         modules_failed = 0
         vmlinuz_signed = False
+        initrd_updated = False
 
         while True:
             line = process.stdout.readline()
@@ -1822,6 +1819,12 @@ echo "VMLINUZ_SIGNED:0"
                         progress_callback(total_modules, total_modules, "vmlinuz")
                     logging.debug("Signing vmlinuz...")
 
+                # Parser la progression initrd
+                elif line.startswith('PROGRESS_INITRD:'):
+                    if progress_callback:
+                        progress_callback(total_modules, total_modules, "initrd")
+                    logging.debug("Regenerating initrd...")
+
                 # Parser les résultats
                 elif line.startswith('MODULES_SIGNED:'):
                     modules_signed = int(line.split(':')[1])
@@ -1829,6 +1832,8 @@ echo "VMLINUZ_SIGNED:0"
                     modules_failed = int(line.split(':')[1])
                 elif line.startswith('VMLINUZ_SIGNED:'):
                     vmlinuz_signed = (line.split(':')[1] == '1')
+                elif line.startswith('INITRD_UPDATED:'):
+                    initrd_updated = (line.split(':')[1] == '1')
 
         process.wait()
 
@@ -1838,24 +1843,26 @@ echo "VMLINUZ_SIGNED:0"
         except:
             pass
 
-        success = (modules_failed == 0) and (not sign_vmlinuz_flag or vmlinuz_signed)
+        success = (modules_failed == 0) and (not sign_vmlinuz_flag or vmlinuz_signed) and initrd_updated
 
-        logging.info(f"Complete signing finished: modules={modules_signed}/{total_modules}, vmlinuz={vmlinuz_signed}")
+        logging.info(f"Complete signing finished: modules={modules_signed}/{total_modules}, vmlinuz={vmlinuz_signed}, initrd={initrd_updated}")
 
         self.add_to_history(
             "Complete Kernel Signing",
-            f"Kernel {kernel_version}: {modules_signed} modules signed, vmlinuz={'✅' if vmlinuz_signed else '❌'}",
+            f"Kernel {kernel_version}: {modules_signed} modules signed, vmlinuz={'✅' if vmlinuz_signed else '❌'}, initrd={'✅' if initrd_updated else '❌'}",
             success=success
         )
 
         message = f'Signed {modules_signed}/{total_modules} modules'
         if sign_vmlinuz_flag:
             message += f', vmlinuz: {"✅" if vmlinuz_signed else "❌"}'
+        message += f', initrd: {"✅ regenerated" if initrd_updated else "❌ failed"}'
 
         return {
             'success': success,
             'message': message,
             'modules_signed': modules_signed,
             'modules_failed': modules_failed,
-            'vmlinuz_signed': vmlinuz_signed
+            'vmlinuz_signed': vmlinuz_signed,
+            'initrd_updated': initrd_updated
         }
