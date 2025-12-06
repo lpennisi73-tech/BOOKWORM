@@ -1047,6 +1047,63 @@ echo "FAILED:$failed"
             'errors': errors
         }
 
+    def _find_vmlinuz_for_kernel(self, kernel_version):
+        """
+        Trouve le fichier vmlinuz correspondant à un kernel de manière intelligente
+        Gère les cas où le nom dans /boot/ ne correspond pas exactement au nom dans /lib/modules/
+
+        Args:
+            kernel_version: Version du kernel (ex: "6.17.10-kernelcustom-secureboot")
+        Returns: Path object du fichier vmlinuz trouvé, ou None
+        """
+        boot_dir = Path("/boot")
+
+        # 1. Essayer le nom exact
+        exact_match = boot_dir / f"vmlinuz-{kernel_version}"
+        if exact_match.exists():
+            logging.debug(f"Found exact match: {exact_match}")
+            return exact_match
+
+        # 2. Extraire la version de base (ex: "6.17.10" depuis "6.17.10-kernelcustom-secureboot")
+        version_parts = kernel_version.split('-')
+        if not version_parts:
+            return None
+
+        base_version = version_parts[0]  # ex: "6.17.10"
+        logging.debug(f"Base version: {base_version}, searching for matches...")
+
+        # 3. Chercher tous les vmlinuz qui correspondent à cette version de base
+        candidates = []
+        for vmlinuz_file in boot_dir.glob(f"vmlinuz-{base_version}*"):
+            # Exclure les backups et fichiers temporaires
+            if any(suffix in vmlinuz_file.name for suffix in ['.unsigned', '.old', '.bak', '.signed']):
+                logging.debug(f"Skipping backup/temp file: {vmlinuz_file}")
+                continue
+
+            # Vérifier que le nom contient au moins une partie du kernel_version
+            # (pour éviter les faux positifs avec d'autres kernels de même version de base)
+            filename = vmlinuz_file.name.replace('vmlinuz-', '')
+
+            # Compter combien de parties du nom correspondent
+            score = 0
+            for part in version_parts:
+                if part in filename:
+                    score += 1
+
+            if score > 0:
+                candidates.append((vmlinuz_file, score))
+                logging.debug(f"Candidate: {vmlinuz_file} (score: {score})")
+
+        # 4. Trier par score (le plus de correspondances en premier)
+        if candidates:
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            best_match = candidates[0][0]
+            logging.info(f"Found best match: {best_match} (score: {candidates[0][1]})")
+            return best_match
+
+        logging.warning(f"No vmlinuz found for kernel {kernel_version}")
+        return None
+
     def sign_vmlinuz(self, kernel_version, progress_callback=None):
         """
         Signe l'image vmlinuz d'un kernel avec la clé MOK
@@ -1070,15 +1127,18 @@ echo "FAILED:$failed"
                 'message': 'MOK keys not found. Generate keys first.'
             }
 
-        # Trouver l'image vmlinuz
-        vmlinuz_path = Path(f"/boot/vmlinuz-{kernel_version}")
-        logging.debug(f"vmlinuz path: {vmlinuz_path} (exists: {vmlinuz_path.exists()})")
+        # Trouver l'image vmlinuz avec recherche intelligente
+        vmlinuz_path = self._find_vmlinuz_for_kernel(kernel_version)
 
-        if not vmlinuz_path.exists():
-            logging.error(f"vmlinuz not found: {vmlinuz_path}")
+        if not vmlinuz_path:
+            # Chercher dans /boot/ pour aider au debugging
+            boot_files = list(Path("/boot").glob("vmlinuz-*"))
+            boot_files_str = "\n  ".join([f.name for f in boot_files[:10]])
+            logging.error(f"vmlinuz not found for {kernel_version}")
+            logging.debug(f"Available vmlinuz files in /boot/:\n  {boot_files_str}")
             return {
                 'success': False,
-                'message': f'vmlinuz not found: {vmlinuz_path}'
+                'message': f'vmlinuz not found for kernel {kernel_version}. Available files: {", ".join([f.name for f in boot_files[:5]])}'
             }
 
         # Vérifier que sbsign est installé
