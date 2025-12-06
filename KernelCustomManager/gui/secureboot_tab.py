@@ -148,15 +148,15 @@ def create_wizard_tab(main_window, sb_manager, i18n):
     )
     box.pack_start(diagnose_btn, False, False, 0)
 
-    # Lancer automatiquement au chargement
+    # Lancer automatiquement au chargement (sans vider le cache)
     GLib.idle_add(lambda: run_diagnosis_wizard(
-        sb_manager, diagnosis_label, actions_box, main_window, i18n
+        sb_manager, diagnosis_label, actions_box, main_window, i18n, clear_cache=False
     ))
 
     return box
 
 
-def run_diagnosis_wizard(sb_manager, diagnosis_label, actions_box, main_window, i18n):
+def run_diagnosis_wizard(sb_manager, diagnosis_label, actions_box, main_window, i18n, clear_cache=True):
     """Execute le diagnostic et affiche les actions recommandées"""
 
     # Nettoyer les actions précédentes
@@ -166,8 +166,9 @@ def run_diagnosis_wizard(sb_manager, diagnosis_label, actions_box, main_window, 
     diagnosis_label.set_markup("<i>" + i18n._("secureboot.analyzing") + "...</i>")
 
     def do_diagnosis():
-        # Vider le cache MOK pour obtenir les données à jour
-        sb_manager.clear_mok_cache()
+        # Vider le cache MOK pour obtenir les données à jour (seulement si demandé)
+        if clear_cache:
+            sb_manager.clear_mok_cache()
         diag = sb_manager.diagnose_secureboot_issue()
 
         GLib.idle_add(lambda: display_diagnosis_results(
