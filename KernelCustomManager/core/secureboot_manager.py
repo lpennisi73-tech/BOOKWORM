@@ -278,8 +278,13 @@ class SecureBootManager:
                     'message': 'No MOK keys enrolled'
                 }
 
-            # Chercher notre clé
-            if "kernelcustom" in output.lower():
+            # Chercher notre clé (supporte différents formats de nom)
+            output_lower = output.lower()
+            # Formats supportés :
+            # - "kernelcustom" (ancien format, tout attaché)
+            # - "kernel custom" (nouveau format, avec espace)
+            # - "kernel custom mok key" (format complet)
+            if "kernelcustom" in output_lower or "kernel custom" in output_lower:
                 return {
                     'status': 'enrolled',
                     'key_found': True,
