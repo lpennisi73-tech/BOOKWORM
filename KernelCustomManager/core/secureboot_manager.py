@@ -645,28 +645,32 @@ class SecureBootManager:
     def _find_sign_file_tool(self):
         """Trouve l'outil sign-file du kernel"""
         # Chercher dans les emplacements communs
+        kernel_version = os.uname().release
+        kernel_major_minor = '.'.join(kernel_version.split('.')[:2])
+
         possible_locations = [
-            Path("/usr/src/linux-headers-" + os.uname().release) / "scripts" / "sign-file",
-            Path("/usr/lib/linux-kbuild-" + os.uname().release.split('-')[0]) / "scripts" / "sign-file",
-            Path("/lib/modules") / os.uname().release / "build" / "scripts" / "sign-file"
+            # Ubuntu/Debian - headers actuels
+            Path("/usr/src/linux-headers-" + kernel_version) / "scripts" / "sign-file",
+            # Ubuntu - kbuild-tools
+            Path("/usr/lib/linux-kbuild-" + kernel_major_minor) / "scripts" / "sign-file",
+            # Debian - kbuild-tools
+            Path("/usr/lib/linux-kbuild-" + kernel_version.split('-')[0]) / "scripts" / "sign-file",
+            # Module build symlink
+            Path("/lib/modules") / kernel_version / "build" / "scripts" / "sign-file",
+            # Chemins alternatifs pour Debian
+            Path("/usr/lib/linux-tools-" + kernel_version) / "sign-file",
+            Path("/usr/lib/linux-tools-" + kernel_major_minor) / "sign-file",
         ]
 
         for location in possible_locations:
-            if location.exists():
+            if location.exists() and location.is_file():
                 return location
 
-        # Chercher avec which
-        try:
-            result = subprocess.run(
-                ["which", "sign-file"],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            if result.returncode == 0:
-                return Path(result.stdout.strip())
-        except:
-            pass
+        # Chercher avec shutil.which avec PATH étendu
+        extended_path = os.environ.get('PATH', '') + ':/sbin:/usr/sbin:/usr/local/sbin'
+        result = shutil.which("sign-file", path=extended_path)
+        if result:
+            return Path(result)
 
         return None
 
@@ -730,15 +734,13 @@ class SecureBootManager:
 
     def _check_command(self, command):
         """Vérifie si une commande est disponible"""
-        try:
-            subprocess.run(
-                ["which", command],
-                capture_output=True,
-                check=True
-            )
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
+        # Étendre le PATH pour inclure /sbin et /usr/sbin (pour Debian)
+        extended_path = os.environ.get('PATH', '') + ':/sbin:/usr/sbin:/usr/local/sbin'
+
+        # Utiliser shutil.which avec le PATH étendu
+        result = shutil.which(command, path=extended_path)
+
+        return result is not None
 
     def get_system_info(self):
         """Récupère les informations système pertinentes pour SecureBoot"""
