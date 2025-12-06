@@ -457,6 +457,8 @@ def start_module_signing_wizard(sb_manager, main_window, i18n):
                 def update_module_progress(current, total, module_name):
                     fraction = (current_task + (current / total)) / total_tasks
                     text = f"[{current_task + 1}/{total_tasks}] {kernel_ver}: {current}/{total} modules"
+                    if module_name:
+                        text += f"\n{module_name}"
                     GLib.idle_add(progress.set_fraction, fraction)
                     GLib.idle_add(progress.set_text, text)
 
