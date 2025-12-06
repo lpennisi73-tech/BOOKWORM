@@ -659,6 +659,64 @@ def update_dependencies_display(sb_manager, label, i18n):
     label.set_markup('\n'.join(text))
 
 
+def find_available_kbuild_package():
+    """Trouve le package linux-kbuild disponible pour le kernel actuel"""
+    import os
+    import subprocess
+    import re
+
+    kernel_version = os.uname().release
+    # Extraire la version complète (ex: 6.12.31 depuis 6.12.31-kernelcustom)
+    version_match = re.match(r'(\d+\.\d+\.\d+)', kernel_version)
+    if not version_match:
+        # Fallback sur major.minor
+        kernel_major_minor = '.'.join(kernel_version.split('.')[:2])
+        return f'linux-kbuild-{kernel_major_minor}'
+
+    full_version = version_match.group(1)  # Ex: 6.12.31
+    kernel_major_minor = '.'.join(full_version.split('.')[:2])  # Ex: 6.12
+
+    # Liste des candidats par ordre de préférence
+    candidates = [
+        f'linux-kbuild-{full_version}',  # Exact: linux-kbuild-6.12.31
+        f'linux-kbuild-{kernel_major_minor}',  # Général: linux-kbuild-6.12
+    ]
+
+    # Chercher les packages disponibles avec apt-cache
+    try:
+        result = subprocess.run(
+            ['apt-cache', 'search', f'^linux-kbuild-{kernel_major_minor}'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+
+        if result.returncode == 0 and result.stdout.strip():
+            # Extraire les noms de packages
+            available_packages = []
+            for line in result.stdout.strip().split('\n'):
+                pkg_match = re.match(r'^(linux-kbuild-[\d\.\+a-z]+)', line)
+                if pkg_match:
+                    available_packages.append(pkg_match.group(1))
+
+            # Chercher d'abord la version exacte
+            for candidate in candidates:
+                if candidate in available_packages:
+                    return candidate
+
+            # Si pas de version exacte, prendre le plus récent disponible
+            if available_packages:
+                # Trier par version (le plus récent en dernier)
+                available_packages.sort()
+                return available_packages[-1]
+    except Exception as e:
+        print(f"[DEBUG] Erreur lors de la recherche de linux-kbuild: {e}")
+
+    # Fallback: essayer avec les headers du kernel actuel
+    headers_package = f'linux-headers-{kernel_version}'
+    return headers_package
+
+
 def install_dependencies(main_window, sb_manager, deps_label, i18n):
     """Installe les dépendances manquantes"""
     import os
@@ -687,11 +745,9 @@ def install_dependencies(main_window, sb_manager, deps_label, i18n):
             packages.append('sbsigntool')
             package_descriptions.append('sbsigntool (signature UEFI)')
 
-    # sign-file est dans linux-kbuild-X.Y
+    # sign-file est dans linux-kbuild-X.Y.Z (détection intelligente)
     if not deps['dependencies']['sign-file']:
-        kernel_version = os.uname().release
-        kernel_major_minor = '.'.join(kernel_version.split('.')[:2])
-        kbuild_package = f'linux-kbuild-{kernel_major_minor}'
+        kbuild_package = find_available_kbuild_package()
         packages.append(kbuild_package)
         package_descriptions.append(f'{kbuild_package} (signature de modules)')
 
