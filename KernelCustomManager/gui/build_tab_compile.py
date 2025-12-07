@@ -133,9 +133,39 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
     distro_info = sb_manager.get_distribution_info()
     is_debian = distro_info['is_debian']
 
-    # Sur Debian, empêcher la compression des modules pour éviter les problèmes
-    # Ubuntu ne compresse pas par défaut, Debian compresse en .xz
-    modules_compress_option = "MODULES_COMPRESS=none" if is_debian else ""
+    # Sur Debian, désactiver la compression des modules dans le .config
+    # Ubuntu ne compresse pas par défaut, Debian active CONFIG_MODULE_COMPRESS_XZ
+    if is_debian:
+        config_file = linux_dir / ".config"
+        if config_file.exists():
+            # Lire le fichier .config
+            with open(config_file, 'r') as f:
+                config_content = f.read()
+
+            # Désactiver toutes les options de compression des modules
+            config_modified = False
+            if 'CONFIG_MODULE_COMPRESS_XZ=y' in config_content:
+                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_XZ=y', '# CONFIG_MODULE_COMPRESS_XZ is not set')
+                config_modified = True
+            if 'CONFIG_MODULE_COMPRESS_GZIP=y' in config_content:
+                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_GZIP=y', '# CONFIG_MODULE_COMPRESS_GZIP is not set')
+                config_modified = True
+            if 'CONFIG_MODULE_COMPRESS_ZSTD=y' in config_content:
+                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ZSTD=y', '# CONFIG_MODULE_COMPRESS_ZSTD is not set')
+                config_modified = True
+
+            # Ajouter CONFIG_MODULE_COMPRESS_NONE=y si pas présent
+            if 'CONFIG_MODULE_COMPRESS_NONE' not in config_content:
+                config_content += '\nCONFIG_MODULE_COMPRESS_NONE=y\n'
+                config_modified = True
+            elif 'CONFIG_MODULE_COMPRESS_NONE is not set' in config_content:
+                config_content = config_content.replace('# CONFIG_MODULE_COMPRESS_NONE is not set', 'CONFIG_MODULE_COMPRESS_NONE=y')
+                config_modified = True
+
+            # Sauvegarder le .config modifié
+            if config_modified:
+                with open(config_file, 'w') as f:
+                    f.write(config_content)
 
     # Préparer les variables pour la signature SecureBoot (initialisées vides par défaut)
     signing_before_bindeb = ""
@@ -298,13 +328,13 @@ echo ''
                     search_path="."
                 )
 
-                # Pour Debian : signer APRÈS bindeb-pkg (modules .ko NON compressés grâce à MODULES_COMPRESS=none)
+                # Pour Debian : signer APRÈS bindeb-pkg (modules .ko NON compressés grâce à CONFIG_MODULE_COMPRESS_NONE)
                 # On détermine le nom du kernel avec le suffixe
                 kernel_name = f"{kernel_version}{suffix}" if suffix else kernel_version
 
                 signing_after_bindeb_content = f"""
 # DEBIAN POST-BINDEB SIGNING
-# Sur Debian, avec MODULES_COMPRESS=none, les modules restent en .ko
+# Sur Debian, avec CONFIG_MODULE_COMPRESS_NONE=y, les modules restent en .ko
 # Il faut signer APRÈS bindeb-pkg + régénérer l'initrd
 
 echo ''
@@ -312,7 +342,7 @@ echo '================================='
 echo '{i18n._("secureboot.signing_modules_after_packaging_debian")}'
 echo '================================='
 echo ''
-echo '⚠️  Debian détecté : Utilisation de MODULES_COMPRESS=none'
+echo '⚠️  Debian détecté : CONFIG_MODULE_COMPRESS_NONE utilisé'
 echo '🔧 Signature des modules dans /lib/modules/ nécessaire...'
 echo ''
 
@@ -380,7 +410,7 @@ echo '{i18n._("compilation.threads", count=jobs)}'
 echo '{i18n._("compilation.suffix", suffix=(suffix or i18n._("compilation.suffix_none")))}'
 echo '{i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no")))}'
 {"echo 'SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + "'" if sign_for_secureboot else ""}
-{"echo 'Distribution: Debian (MODULES_COMPRESS=none)'" if is_debian else "echo 'Distribution: Ubuntu (modules non compressés par défaut)'"}
+{"echo 'Distribution: Debian (CONFIG_MODULE_COMPRESS_NONE activé)'" if is_debian else "echo 'Distribution: Ubuntu (modules non compressés par défaut)'"}
 echo ''
 echo '{i18n._("compilation.starting")}'
 sleep 2
@@ -408,7 +438,7 @@ fi
 # Étape 2: Création du package .deb
 echo ''
 echo '{i18n._("compilation.creating_package")}'
-{fakeroot_cmd}make bindeb-pkg {modules_compress_option} {suffix_cmd} 2>&1 | tee -a '{log_file}'
+{fakeroot_cmd}make bindeb-pkg {suffix_cmd} 2>&1 | tee -a '{log_file}'
 RESULT=${{{{PIPESTATUS[0]}}}}
 
 if [ $RESULT -ne 0 ]; then
