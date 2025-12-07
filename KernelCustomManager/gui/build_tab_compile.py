@@ -365,12 +365,24 @@ DEB_FILE="../linux-image-$${{{{KERNEL_VERSION}}}}_*.deb"
 # Vérifier que le .deb existe
 if ! ls $DEB_FILE 1> /dev/null 2>&1; then
     echo "❌ Erreur: Package .deb non trouvé"
-    exit 1
+    echo ""
+    echo "⚠️  Poursuite du déplacement des packages malgré l'erreur..."
+    echo ""
+else
+    # Installer temporairement le package pour accéder aux modules
+    echo "📦 Installation temporaire du package pour accéder aux modules..."
+    if sudo dpkg -i $DEB_FILE 2>&1 | grep -v "^dpkg:"; then
+        echo "✅ Package installé temporairement"
+    else
+        echo "❌ Erreur lors de l'installation temporaire du package"
+        echo "⚠️  Les modules n'ont pas pu être signés automatiquement"
+        echo "ℹ️  Vous devrez les signer manuellement après installation"
+        echo ""
+    fi
 fi
 
-# Installer temporairement le package pour accéder aux modules
-echo "📦 Installation temporaire du package pour accéder aux modules..."
-sudo dpkg -i $DEB_FILE 2>&1 | grep -v "^dpkg:"
+# Si l'installation a réussi, signer les modules dans /lib/modules/
+if [ -d "/lib/modules/{kernel_name}" ]; then
 
 # Maintenant signer les modules installés dans /lib/modules/
 """ + base_signing_script.format(
@@ -387,23 +399,58 @@ sudo dpkg -i $DEB_FILE 2>&1 | grep -v "^dpkg:"
                     signing_failed_message="Signature échouée",
                     search_path=f"/lib/modules/{kernel_name}"
                 ) + f"""
-# Régénérer l'initrd avec les modules signés
-echo ''
-echo '🔄 Régénération de l'initrd avec les modules signés...'
-sudo update-initramfs -u -k "{kernel_name}"
+    # Régénérer l'initrd avec les modules signés
+    echo ''
+    echo '🔄 Régénération de l'initrd avec les modules signés...'
+    if sudo update-initramfs -u -k "{kernel_name}" 2>&1; then
+        echo "✅ Initrd régénéré avec succès"
 
-if [ $? -eq 0 ]; then
-    echo "✅ Initrd régénéré avec succès"
+        # IMPORTANT: Re-créer le package .deb avec les modules signés
+        echo ''
+        echo '📦 Recréation du package .deb avec les modules signés...'
+
+        # Créer un répertoire temporaire pour extraire le .deb
+        TEMP_DEB_DIR=$(mktemp -d)
+
+        # Extraire le .deb
+        dpkg-deb -R $DEB_FILE "$TEMP_DEB_DIR"
+
+        # Remplacer les modules dans le .deb par les modules signés
+        rsync -a --delete /lib/modules/{kernel_name}/ "$TEMP_DEB_DIR/lib/modules/{kernel_name}/"
+
+        # Copier aussi l'initrd mis à jour
+        if [ -f "/boot/initrd.img-{kernel_name}" ]; then
+            mkdir -p "$TEMP_DEB_DIR/boot"
+            cp "/boot/initrd.img-{kernel_name}" "$TEMP_DEB_DIR/boot/" 2>/dev/null || true
+        fi
+
+        # Reconstruire le .deb
+        dpkg-deb -b "$TEMP_DEB_DIR" "$DEB_FILE.signed"
+
+        if [ $? -eq 0 ]; then
+            # Remplacer l'ancien .deb par le nouveau
+            mv "$DEB_FILE.signed" "$DEB_FILE"
+            echo "✅ Package .deb recréé avec les modules signés"
+        else
+            echo "❌ Erreur lors de la recréation du .deb"
+            rm -f "$DEB_FILE.signed"
+        fi
+
+        # Nettoyer
+        rm -rf "$TEMP_DEB_DIR"
+    else
+        echo "❌ Erreur lors de la régénération de l'initrd"
+        echo "⚠️  L'initrd peut contenir des modules non signés"
+    fi
+
+    echo ''
+    echo '================================='
+    echo '✅ Signature post-bindeb terminée (Debian)'
+    echo '================================='
+    echo ''
 else
-    echo "❌ Erreur lors de la régénération de l'initrd"
-    exit 1
+    echo "⚠️  Répertoire /lib/modules/{kernel_name} non trouvé, signature ignorée"
 fi
-
-echo ''
-echo '================================='
-echo '✅ Signature post-bindeb terminée (Debian)'
-echo '================================='
-echo ''
 """
                 # Choisir le bon script de signature selon la distribution
                 if needs_post_bindeb_signing:
