@@ -1661,7 +1661,9 @@ echo "SUCCESS"
                 check=False
             )
 
-            is_signed = result.returncode == 0
+            # sbverify peut retourner returncode=0 avec des warnings dans stderr
+            # Il faut vérifier "Signature verification OK" dans stdout
+            is_signed = (result.returncode == 0) and ("Signature verification OK" in result.stdout or "Signature verification OK" in result.stderr)
 
             return {
                 'success': True,
