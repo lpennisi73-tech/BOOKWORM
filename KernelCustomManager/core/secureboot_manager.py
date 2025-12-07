@@ -981,17 +981,17 @@ sign_module() {{
     if [[ "$module" == *.ko.xz ]]; then
         compressed=true
         compression_type="xz"
-        ko_file="${module%.xz}"
+        ko_file="${{module%.xz}}"
         xz -d -k "$module" 2>/dev/null || return 1
     elif [[ "$module" == *.ko.gz ]]; then
         compressed=true
         compression_type="gz"
-        ko_file="${module%.gz}"
+        ko_file="${{module%.gz}}"
         gzip -d -k "$module" 2>/dev/null || return 1
     elif [[ "$module" == *.ko.zst ]]; then
         compressed=true
         compression_type="zst"
-        ko_file="${module%.zst}"
+        ko_file="${{module%.zst}}"
         zstd -d -q "$module" -o "$ko_file" 2>/dev/null || return 1
     fi
 
@@ -1282,15 +1282,15 @@ if [ ! -f "$VMLINUZ" ]; then
 fi
 
 # Créer backup si nécessaire
-if [ ! -f "${VMLINUZ}.unsigned" ]; then
-    cp "$VMLINUZ" "${VMLINUZ}.unsigned"
+if [ ! -f "${{VMLINUZ}}.unsigned" ]; then
+    cp "$VMLINUZ" "${{VMLINUZ}}.unsigned"
 fi
 
 # Signer l'image
-sbsign --key "$MOK_PRIV" --cert "$MOK_CERT" --output "${VMLINUZ}.signed" "$VMLINUZ" 2>&1
+sbsign --key "$MOK_PRIV" --cert "$MOK_CERT" --output "${{VMLINUZ}}.signed" "$VMLINUZ" 2>&1
 
 # Remplacer l'original
-mv "${VMLINUZ}.signed" "$VMLINUZ"
+mv "${{VMLINUZ}}.signed" "$VMLINUZ"
 
 echo "SUCCESS"
 """
@@ -1995,17 +1995,17 @@ sign_module() {{
     if [[ "$module" == *.ko.xz ]]; then
         compressed=true
         compression_type="xz"
-        ko_file="${module%.xz}"
+        ko_file="${{module%.xz}}"
         xz -d -k "$module" 2>/dev/null || return 1
     elif [[ "$module" == *.ko.gz ]]; then
         compressed=true
         compression_type="gz"
-        ko_file="${module%.gz}"
+        ko_file="${{module%.gz}}"
         gzip -d -k "$module" 2>/dev/null || return 1
     elif [[ "$module" == *.ko.zst ]]; then
         compressed=true
         compression_type="zst"
-        ko_file="${module%.zst}"
+        ko_file="${{module%.zst}}"
         zstd -d -q "$module" -o "$ko_file" 2>/dev/null || return 1
     fi
 
@@ -2068,13 +2068,13 @@ vmlinuz_signed=0
 echo "PROGRESS_VMLINUZ:signing"
 
 # Créer backup si nécessaire
-if [ ! -f "${VMLINUZ}.unsigned" ]; then
-    cp "$VMLINUZ" "${VMLINUZ}.unsigned"
+if [ ! -f "${{VMLINUZ}}.unsigned" ]; then
+    cp "$VMLINUZ" "${{VMLINUZ}}.unsigned"
 fi
 
 # Signer l'image
-if sbsign --key "$MOK_PRIV" --cert "$MOK_CERT_PEM" --output "${VMLINUZ}.signed" "$VMLINUZ" 2>&1; then
-    mv "${VMLINUZ}.signed" "$VMLINUZ"
+if sbsign --key "$MOK_PRIV" --cert "$MOK_CERT_PEM" --output "${{VMLINUZ}}.signed" "$VMLINUZ" 2>&1; then
+    mv "${{VMLINUZ}}.signed" "$VMLINUZ"
     vmlinuz_signed=1
     echo "VMLINUZ_SIGNED:1"
 else
