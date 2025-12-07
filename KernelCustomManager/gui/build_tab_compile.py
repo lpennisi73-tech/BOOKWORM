@@ -129,9 +129,9 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
     sb_manager = main_window.secureboot_manager
     needs_post_bindeb_signing = sb_manager.needs_post_bindeb_signing()
 
-    # Préparer les variables pour la signature SecureBoot
-    signing_script_pre_bindeb = ""  # Pour Ubuntu (avant bindeb-pkg)
-    signing_script_post_bindeb = ""  # Pour Debian (après bindeb-pkg)
+    # Préparer les variables pour la signature SecureBoot (initialisées vides par défaut)
+    signing_before_bindeb = ""
+    signing_after_bindeb = ""
 
     if sign_for_secureboot:
         keys_dir = sb_manager.keys_dir
@@ -275,7 +275,7 @@ echo ''
 """
 
                 # Pour Ubuntu : signer AVANT bindeb-pkg (modules .ko non compressés)
-                signing_script_pre_bindeb = base_signing_script.format(
+                signing_before_bindeb_content = base_signing_script.format(
                     timing_message=i18n._("secureboot.signing_modules_before_packaging"),
                     count_message=i18n._("secureboot.counting_modules"),
                     found_message=i18n._("secureboot.found_modules"),
@@ -294,7 +294,7 @@ echo ''
                 # On détermine le nom du kernel avec le suffixe
                 kernel_name = f"{kernel_version}{suffix}" if suffix else kernel_version
 
-                signing_script_post_bindeb = f"""
+                signing_after_bindeb_content = f"""
 # DEBIAN POST-BINDEB SIGNING
 # Sur Debian, bindeb-pkg recompresse les modules en .xz et écrase les signatures
 # Il faut donc re-signer APRÈS bindeb-pkg + régénérer l'initrd
@@ -355,16 +355,15 @@ echo '✅ Signature post-bindeb terminée (Debian)'
 echo '================================='
 echo ''
 """
-
-    # Choisir le bon script de signature selon la distribution
-    if needs_post_bindeb_signing:
-        # Debian : on ne signe PAS avant bindeb-pkg
-        signing_before_bindeb = ""
-        signing_after_bindeb = signing_script_post_bindeb
-    else:
-        # Ubuntu : on signe AVANT bindeb-pkg
-        signing_before_bindeb = signing_script_pre_bindeb
-        signing_after_bindeb = ""
+                # Choisir le bon script de signature selon la distribution
+                if needs_post_bindeb_signing:
+                    # Debian : on ne signe PAS avant bindeb-pkg
+                    signing_before_bindeb = ""
+                    signing_after_bindeb = signing_after_bindeb_content
+                else:
+                    # Ubuntu : on signe AVANT bindeb-pkg
+                    signing_before_bindeb = signing_before_bindeb_content
+                    signing_after_bindeb = ""
 
     cmd = f"""
 cd '{linux_dir}' || exit 1
