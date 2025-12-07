@@ -229,7 +229,7 @@ echo "🔍 {{count_message}}..."
 
 # Compter d'abord tous les modules (incluant .ko.xz sur Debian)
 MODULES=($(find {{search_path}} -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.gz" -o -name "*.ko.zst"))
-TOTAL_MODULES=${{{{#MODULES[@]}}}}
+TOTAL_MODULES=${{#MODULES[@]}}
 
 echo "📦 {{found_message}}: $TOTAL_MODULES"
 echo ""
@@ -245,7 +245,7 @@ else
     FAILED_COUNT=0
     CURRENT=0
 
-    for module in "${{{{MODULES[@]}}}}"; do
+    for module in "${{MODULES[@]}}"; do
         CURRENT=$((CURRENT + 1))
         MODULE_NAME=$(basename "$module")
 
@@ -258,17 +258,17 @@ else
         if [[ "$module" == *.ko.xz ]]; then
             COMPRESSED=true
             COMPRESSION_TYPE="xz"
-            MODULE_TO_SIGN="${{{{module%.xz}}}}"
+            MODULE_TO_SIGN="${{module%.xz}}"
             xz -d -k "$module" 2>/dev/null || continue
         elif [[ "$module" == *.ko.gz ]]; then
             COMPRESSED=true
             COMPRESSION_TYPE="gz"
-            MODULE_TO_SIGN="${{{{module%.gz}}}}"
+            MODULE_TO_SIGN="${{module%.gz}}"
             gzip -d -k "$module" 2>/dev/null || continue
         elif [[ "$module" == *.ko.zst ]]; then
             COMPRESSED=true
             COMPRESSION_TYPE="zst"
-            MODULE_TO_SIGN="${{{{module%.zst}}}}"
+            MODULE_TO_SIGN="${{module%.zst}}"
             zstd -d -q "$module" -o "$MODULE_TO_SIGN" 2>/dev/null || continue
         fi
 
@@ -360,7 +360,7 @@ echo ''
 
 # Extraire le .deb et signer les modules
 KERNEL_VERSION="{kernel_name}"
-DEB_FILE="../linux-image-${{{{KERNEL_VERSION}}}}_*.deb"
+DEB_FILE="../linux-image-${{KERNEL_VERSION}}_*.deb"
 
 # Vérifier que le .deb existe
 if ! ls $DEB_FILE 1> /dev/null 2>&1; then
@@ -431,7 +431,7 @@ sleep 2
 echo ''
 echo '{i18n._("compilation.compiling_modules")}'
 make -j{jobs} {suffix_cmd} 2>&1 | tee '{log_file}'
-RESULT=${{{{PIPESTATUS[0]}}}}
+RESULT=${{PIPESTATUS[0]}}
 
 if [ $RESULT -ne 0 ]; then
     echo ''
@@ -451,7 +451,7 @@ fi
 echo ''
 echo '{i18n._("compilation.creating_package")}'
 {fakeroot_cmd}make bindeb-pkg {suffix_cmd} 2>&1 | tee -a '{log_file}'
-RESULT=${{{{PIPESTATUS[0]}}}}
+RESULT=${{PIPESTATUS[0]}}
 
 if [ $RESULT -ne 0 ]; then
     echo ''
