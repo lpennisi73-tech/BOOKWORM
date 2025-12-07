@@ -759,6 +759,65 @@ class SecureBootManager:
         supported_archs = ['x86_64', 'amd64', 'i386', 'i686']
         return arch in supported_archs
 
+    def get_distribution_info(self):
+        """
+        Détecte la distribution Linux (Debian vs Ubuntu vs autres)
+        Returns: dict avec 'id' (debian/ubuntu/unknown), 'version', 'is_debian_based'
+        """
+        try:
+            # Méthode 1: lire /etc/os-release (standard)
+            os_release_file = Path("/etc/os-release")
+            if os_release_file.exists():
+                distro_info = {}
+                with open(os_release_file, 'r') as f:
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            distro_info[key] = value.strip('"')
+
+                distro_id = distro_info.get('ID', '').lower()
+                version_id = distro_info.get('VERSION_ID', '')
+
+                return {
+                    'id': distro_id,
+                    'version': version_id,
+                    'is_debian_based': distro_id in ['debian', 'ubuntu'],
+                    'is_debian': distro_id == 'debian',
+                    'is_ubuntu': distro_id == 'ubuntu'
+                }
+        except Exception as e:
+            logging.warning(f"Failed to detect distribution: {e}")
+
+        # Fallback: unknown
+        return {
+            'id': 'unknown',
+            'version': '',
+            'is_debian_based': False,
+            'is_debian': False,
+            'is_ubuntu': False
+        }
+
+    def needs_post_bindeb_signing(self):
+        """
+        Vérifie si la distribution nécessite la signature APRÈS bindeb-pkg
+        (Debian 13+ recompresse les modules, Ubuntu ne le fait pas)
+        Returns: bool
+        """
+        distro = self.get_distribution_info()
+
+        # Debian 13+ (Trixie) recompresse les modules en .xz dans bindeb-pkg
+        if distro['is_debian']:
+            try:
+                version_major = int(distro['version'].split('.')[0]) if distro['version'] else 0
+                # Debian 13+ (Trixie et versions suivantes)
+                return version_major >= 13
+            except:
+                # Si on ne peut pas déterminer la version, assumer Debian moderne
+                return True
+
+        # Ubuntu ne recompresse pas (ou préserve les signatures)
+        return False
+
     def get_system_info(self):
         """Récupère les informations système pertinentes pour SecureBoot"""
         info = {

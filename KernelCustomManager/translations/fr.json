@@ -402,6 +402,7 @@
     "select_signing_key": "Sélectionnez la clé à utiliser pour la signature :",
     "signing_in_progress": "Signature des modules en cours...",
     "signing_modules_before_packaging": "🔒 Signature des modules kernel pour SecureBoot...",
+    "signing_modules_after_packaging_debian": "🔒 Signature post-bindeb pour Debian (modules recompressés)...",
     "please_wait": "Veuillez patienter, cela peut prendre quelques minutes.",
     "modules_signed_success": "{count} modules signés avec succès sur {total}.",
     "modules_signed_partial": "Signature partielle : {signed}/{total} modules signés.\n\n{failed} modules ont échoué.",
