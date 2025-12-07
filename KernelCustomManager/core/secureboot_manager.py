@@ -860,12 +860,41 @@ class SecureBootManager:
 
     def check_module_signed(self, module_path):
         """
-        Vérifie si un module est signé
+        Vérifie si un module est signé (gère la compression)
         Returns: dict avec signed (bool), signer (str), sig_id (str)
         """
+        import tempfile
+
+        module = Path(module_path)
+        module_to_check = module
+        temp_file = None
+
         try:
+            # Décompresser le module si nécessaire (pour Debian 13 et autres distros)
+            if module.suffix == '.xz':
+                temp_file = tempfile.NamedTemporaryFile(suffix='.ko', delete=False)
+                temp_file.close()
+                subprocess.run(['xz', '-d', '-c', str(module)],
+                             stdout=open(temp_file.name, 'wb'),
+                             check=False, stderr=subprocess.DEVNULL)
+                module_to_check = Path(temp_file.name)
+            elif module.suffix == '.gz':
+                temp_file = tempfile.NamedTemporaryFile(suffix='.ko', delete=False)
+                temp_file.close()
+                subprocess.run(['gzip', '-d', '-c', str(module)],
+                             stdout=open(temp_file.name, 'wb'),
+                             check=False, stderr=subprocess.DEVNULL)
+                module_to_check = Path(temp_file.name)
+            elif module.suffix == '.zst':
+                temp_file = tempfile.NamedTemporaryFile(suffix='.ko', delete=False)
+                temp_file.close()
+                subprocess.run(['zstd', '-d', '-c', str(module), '-o', temp_file.name],
+                             check=False, stderr=subprocess.DEVNULL)
+                module_to_check = Path(temp_file.name)
+
+            # Vérifier la signature avec modinfo
             result = subprocess.run(
-                ["modinfo", "-F", "sig_id", module_path],
+                ["modinfo", "-F", "sig_id", str(module_to_check)],
                 capture_output=True, text=True, check=False
             )
 
@@ -876,7 +905,7 @@ class SecureBootManager:
 
             # Récupérer le signataire
             result2 = subprocess.run(
-                ["modinfo", "-F", "signer", module_path],
+                ["modinfo", "-F", "signer", str(module_to_check)],
                 capture_output=True, text=True, check=False
             )
 
@@ -889,6 +918,13 @@ class SecureBootManager:
             }
         except:
             return {'signed': False, 'signer': None, 'sig_id': None}
+        finally:
+            # Nettoyer le fichier temporaire
+            if temp_file and Path(temp_file.name).exists():
+                try:
+                    os.unlink(temp_file.name)
+                except:
+                    pass
 
     def resign_kernel_modules(self, kernel_version, progress_callback=None):
         """
