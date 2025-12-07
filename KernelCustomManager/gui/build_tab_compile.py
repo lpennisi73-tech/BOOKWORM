@@ -144,6 +144,18 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
 
             # Désactiver toutes les options de compression des modules
             config_modified = False
+
+            # Désactiver CONFIG_MODULE_COMPRESS (option principale)
+            if 'CONFIG_MODULE_COMPRESS=y' in config_content:
+                config_content = config_content.replace('CONFIG_MODULE_COMPRESS=y', '# CONFIG_MODULE_COMPRESS is not set')
+                config_modified = True
+
+            # Désactiver CONFIG_MODULE_COMPRESS_ALL
+            if 'CONFIG_MODULE_COMPRESS_ALL=y' in config_content:
+                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ALL=y', '# CONFIG_MODULE_COMPRESS_ALL is not set')
+                config_modified = True
+
+            # Désactiver les algorithmes de compression spécifiques
             if 'CONFIG_MODULE_COMPRESS_XZ=y' in config_content:
                 config_content = config_content.replace('CONFIG_MODULE_COMPRESS_XZ=y', '# CONFIG_MODULE_COMPRESS_XZ is not set')
                 config_modified = True
