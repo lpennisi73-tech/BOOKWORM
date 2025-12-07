@@ -129,6 +129,14 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
     sb_manager = main_window.secureboot_manager
     needs_post_bindeb_signing = sb_manager.needs_post_bindeb_signing()
 
+    # Détecter la distribution pour adapter la commande bindeb-pkg
+    distro_info = sb_manager.get_distribution_info()
+    is_debian = distro_info['is_debian']
+
+    # Sur Debian, empêcher la compression des modules pour éviter les problèmes
+    # Ubuntu ne compresse pas par défaut, Debian compresse en .xz
+    modules_compress_option = "MODULES_COMPRESS=none" if is_debian else ""
+
     # Préparer les variables pour la signature SecureBoot (initialisées vides par défaut)
     signing_before_bindeb = ""
     signing_after_bindeb = ""
@@ -290,22 +298,22 @@ echo ''
                     search_path="."
                 )
 
-                # Pour Debian : signer APRÈS bindeb-pkg (modules .ko.xz compressés dans /lib/modules/)
+                # Pour Debian : signer APRÈS bindeb-pkg (modules .ko NON compressés grâce à MODULES_COMPRESS=none)
                 # On détermine le nom du kernel avec le suffixe
                 kernel_name = f"{kernel_version}{suffix}" if suffix else kernel_version
 
                 signing_after_bindeb_content = f"""
 # DEBIAN POST-BINDEB SIGNING
-# Sur Debian, bindeb-pkg recompresse les modules en .xz et écrase les signatures
-# Il faut donc re-signer APRÈS bindeb-pkg + régénérer l'initrd
+# Sur Debian, avec MODULES_COMPRESS=none, les modules restent en .ko
+# Il faut signer APRÈS bindeb-pkg + régénérer l'initrd
 
 echo ''
 echo '================================='
 echo '{i18n._("secureboot.signing_modules_after_packaging_debian")}'
 echo '================================='
 echo ''
-echo '⚠️  Debian détecté : bindeb-pkg a recompressé les modules'
-echo '🔧 Re-signature des modules dans /lib/modules/ nécessaire...'
+echo '⚠️  Debian détecté : Utilisation de MODULES_COMPRESS=none'
+echo '🔧 Signature des modules dans /lib/modules/ nécessaire...'
 echo ''
 
 # Extraire le .deb et signer les modules
@@ -372,6 +380,7 @@ echo '{i18n._("compilation.threads", count=jobs)}'
 echo '{i18n._("compilation.suffix", suffix=(suffix or i18n._("compilation.suffix_none")))}'
 echo '{i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no")))}'
 {"echo 'SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + "'" if sign_for_secureboot else ""}
+{"echo 'Distribution: Debian (MODULES_COMPRESS=none)'" if is_debian else "echo 'Distribution: Ubuntu (modules non compressés par défaut)'"}
 echo ''
 echo '{i18n._("compilation.starting")}'
 sleep 2
@@ -399,7 +408,7 @@ fi
 # Étape 2: Création du package .deb
 echo ''
 echo '{i18n._("compilation.creating_package")}'
-{fakeroot_cmd}make bindeb-pkg {suffix_cmd} 2>&1 | tee -a '{log_file}'
+{fakeroot_cmd}make bindeb-pkg {modules_compress_option} {suffix_cmd} 2>&1 | tee -a '{log_file}'
 RESULT=${{{{PIPESTATUS[0]}}}}
 
 if [ $RESULT -ne 0 ]; then
