@@ -125,11 +125,8 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
 
     start_time = datetime.now()
 
-    # Détecter si on doit signer APRÈS bindeb-pkg (Debian 13+)
+    # Détecter la distribution pour adapter la configuration
     sb_manager = main_window.secureboot_manager
-    needs_post_bindeb_signing = sb_manager.needs_post_bindeb_signing()
-
-    # Détecter la distribution pour adapter la commande bindeb-pkg
     distro_info = sb_manager.get_distribution_info()
     is_debian = distro_info['is_debian']
 
@@ -179,9 +176,8 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
                 with open(config_file, 'w') as f:
                     f.write(config_content)
 
-    # Préparer les variables pour la signature SecureBoot (initialisées vides par défaut)
+    # Préparer la signature SecureBoot (TOUJOURS avant bindeb-pkg, simple et fiable)
     signing_before_bindeb = ""
-    signing_after_bindeb = ""
 
     if sign_for_secureboot:
         keys_dir = sb_manager.keys_dir
@@ -201,11 +197,13 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
             cert = key_file.with_suffix('.der')
 
             if cert.exists():
-                # Script de signature des modules (réutilisable)
-                base_signing_script = f"""
+                # Script de signature des modules AVANT bindeb-pkg
+                # Simple et fiable : signe tous les modules .ko dans le répertoire de build
+                # Sur Debian, CONFIG_MODULE_COMPRESS_NONE=y garantit que les modules restent en .ko
+                signing_before_bindeb = f"""
 echo ''
 echo '================================='
-echo '{{timing_message}}'
+echo '{i18n._("secureboot.signing_modules_before_packaging")}'
 echo '================================='
 
 # Trouver l'outil sign-file
@@ -225,19 +223,19 @@ if [ -z "$SIGN_FILE" ]; then
 fi
 
 echo ""
-echo "🔍 {{count_message}}..."
+echo "🔍 {i18n._("secureboot.counting_modules")}..."
 
-# Compter d'abord tous les modules (incluant .ko.xz sur Debian)
-MODULES=($(find {{{{search_path}}}} -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.gz" -o -name "*.ko.zst"))
-TOTAL_MODULES=${{{{#MODULES[@]}}}}
+# Compter les modules .ko (non compressés grâce à CONFIG_MODULE_COMPRESS_NONE)
+MODULES=($(find . -name "*.ko"))
+TOTAL_MODULES=${{#MODULES[@]}}
 
-echo "📦 {{found_message}}: $TOTAL_MODULES"
+echo "📦 {i18n._("secureboot.found_modules")}: $TOTAL_MODULES"
 echo ""
 
 if [ "$TOTAL_MODULES" -eq 0 ]; then
-    echo "⚠️  {{no_modules_message}}"
+    echo "⚠️  {i18n._("secureboot.no_modules_found")}"
 else
-    echo "🔐 {{starting_message}}..."
+    echo "🔐 {i18n._("secureboot.starting_signature")}..."
     echo ""
 
     # Signer tous les modules avec affichage de progression
@@ -245,68 +243,22 @@ else
     FAILED_COUNT=0
     CURRENT=0
 
-    for module in "${{{{MODULES[@]}}}}"; do
+    for module in "${{MODULES[@]}}"; do
         CURRENT=$((CURRENT + 1))
         MODULE_NAME=$(basename "$module")
 
-        # Variables pour gérer la compression
-        COMPRESSED=false
-        COMPRESSION_TYPE=""
-        MODULE_TO_SIGN="$module"
-
-        # Détecter si le module est compressé et le décompresser temporairement
-        if [[ "$module" == *.ko.xz ]]; then
-            COMPRESSED=true
-            COMPRESSION_TYPE="xz"
-            MODULE_TO_SIGN="${{{{module%.xz}}}}"
-            xz -d -k "$module" 2>/dev/null || continue
-        elif [[ "$module" == *.ko.gz ]]; then
-            COMPRESSED=true
-            COMPRESSION_TYPE="gz"
-            MODULE_TO_SIGN="${{{{module%.gz}}}}"
-            gzip -d -k "$module" 2>/dev/null || continue
-        elif [[ "$module" == *.ko.zst ]]; then
-            COMPRESSED=true
-            COMPRESSION_TYPE="zst"
-            MODULE_TO_SIGN="${{{{module%.zst}}}}"
-            zstd -d -q "$module" -o "$MODULE_TO_SIGN" 2>/dev/null || continue
-        fi
-
         # Afficher la progression
         if [ "$TOTAL_MODULES" -le 50 ] || [ $((CURRENT % 10)) -eq 0 ] || [ "$CURRENT" -eq "$TOTAL_MODULES" ]; then
-            printf "\\r🔏 [{{progress_message}}: %3d/%3d] {{signing_message}}: %-50s" "$CURRENT" "$TOTAL_MODULES" "$MODULE_NAME"
+            printf "\\r🔏 [{i18n._("secureboot.progress")}: %3d/%3d] {i18n._("secureboot.signing")}: %-50s" "$CURRENT" "$TOTAL_MODULES" "$MODULE_NAME"
         fi
 
-        # Signer le module .ko décompressé
-        if "$SIGN_FILE" sha256 '{priv_key}' '{cert}' "$MODULE_TO_SIGN" >/dev/null 2>&1; then
+        # Signer le module
+        if "$SIGN_FILE" sha256 '{priv_key}' '{cert}' "$module" >/dev/null 2>&1; then
             SIGNED_COUNT=$((SIGNED_COUNT + 1))
-
-            # Recompresser si nécessaire
-            if [ "$COMPRESSED" = true ]; then
-                case "$COMPRESSION_TYPE" in
-                    xz)
-                        rm -f "$module"
-                        xz -z -k "$MODULE_TO_SIGN" 2>/dev/null
-                        rm -f "$MODULE_TO_SIGN"
-                        ;;
-                    gz)
-                        rm -f "$module"
-                        gzip -c "$MODULE_TO_SIGN" > "$module" 2>/dev/null
-                        rm -f "$MODULE_TO_SIGN"
-                        ;;
-                    zst)
-                        rm -f "$module"
-                        zstd -q "$MODULE_TO_SIGN" -o "$module" 2>/dev/null
-                        rm -f "$MODULE_TO_SIGN"
-                        ;;
-                esac
-            fi
         else
             FAILED_COUNT=$((FAILED_COUNT + 1))
-            # Nettoyer en cas d'échec
-            [ "$COMPRESSED" = true ] && [ -f "$MODULE_TO_SIGN" ] && rm -f "$MODULE_TO_SIGN"
             echo ""
-            echo "  ⚠️  {{failed_message}}: $MODULE_NAME"
+            echo "  ⚠️  {i18n._("secureboot.failed_to_sign")}: $MODULE_NAME"
         fi
     done
 
@@ -314,153 +266,15 @@ else
     echo ""
 
     if [ "$FAILED_COUNT" -eq 0 ]; then
-        echo "✅ {{all_signed_message}}: $SIGNED_COUNT"
+        echo "✅ {i18n._("secureboot.all_modules_signed")}: $SIGNED_COUNT"
     else
-        echo "⚠️  {{signed_with_errors_message}}: $SIGNED_COUNT/$TOTAL_MODULES ({{signing_failed_message}}: $FAILED_COUNT)"
+        echo "⚠️  {i18n._("secureboot.modules_signed_with_errors")}: $SIGNED_COUNT/$TOTAL_MODULES ({i18n._("secureboot.signing_failed")}: $FAILED_COUNT)"
     fi
 fi
 
 echo '================================='
 echo ''
 """
-
-                # Pour Ubuntu : signer AVANT bindeb-pkg (modules .ko non compressés)
-                signing_before_bindeb_content = base_signing_script.format(
-                    timing_message=i18n._("secureboot.signing_modules_before_packaging"),
-                    count_message=i18n._("secureboot.counting_modules"),
-                    found_message=i18n._("secureboot.found_modules"),
-                    no_modules_message=i18n._("secureboot.no_modules_found"),
-                    starting_message=i18n._("secureboot.starting_signature"),
-                    progress_message=i18n._("secureboot.progress"),
-                    signing_message=i18n._("secureboot.signing"),
-                    failed_message=i18n._("secureboot.failed_to_sign"),
-                    all_signed_message=i18n._("secureboot.all_modules_signed"),
-                    signed_with_errors_message=i18n._("secureboot.modules_signed_with_errors"),
-                    signing_failed_message=i18n._("secureboot.signing_failed"),
-                    search_path="."
-                )
-
-                # Pour Debian : signer APRÈS bindeb-pkg (modules .ko NON compressés grâce à CONFIG_MODULE_COMPRESS_NONE)
-                # On détermine le nom du kernel avec le suffixe
-                kernel_name = f"{kernel_version}{suffix}" if suffix else kernel_version
-
-                signing_after_bindeb_content = f"""
-# DEBIAN POST-BINDEB SIGNING
-# Sur Debian, avec CONFIG_MODULE_COMPRESS_NONE=y, les modules restent en .ko
-# Il faut signer APRÈS bindeb-pkg + régénérer l'initrd
-
-echo ''
-echo '================================='
-echo '{i18n._("secureboot.signing_modules_after_packaging_debian")}'
-echo '================================='
-echo ''
-echo '⚠️  Debian détecté : CONFIG_MODULE_COMPRESS_NONE utilisé'
-echo '🔧 Signature des modules dans /lib/modules/ nécessaire...'
-echo ''
-
-# Extraire le .deb et signer les modules
-KERNEL_VERSION="{kernel_name}"
-DEB_FILE="../linux-image-${{KERNEL_VERSION}}_*.deb"
-
-# Vérifier que le .deb existe
-if ! ls $DEB_FILE 1> /dev/null 2>&1; then
-    echo "❌ Erreur: Package .deb non trouvé"
-    echo ""
-    echo "⚠️  Poursuite du déplacement des packages malgré l'erreur..."
-    echo ""
-else
-    # Installer temporairement le package pour accéder aux modules
-    echo "📦 Installation temporaire du package pour accéder aux modules..."
-    if sudo dpkg -i $DEB_FILE 2>&1 | grep -v "^dpkg:"; then
-        echo "✅ Package installé temporairement"
-    else
-        echo "❌ Erreur lors de l'installation temporaire du package"
-        echo "⚠️  Les modules n'ont pas pu être signés automatiquement"
-        echo "ℹ️  Vous devrez les signer manuellement après installation"
-        echo ""
-    fi
-fi
-
-# Si l'installation a réussi, signer les modules dans /lib/modules/
-if [ -d "/lib/modules/{kernel_name}" ]; then
-
-# Maintenant signer les modules installés dans /lib/modules/
-""" + base_signing_script.format(
-                    timing_message="Signature des modules dans /lib/modules/",
-                    count_message="Comptage des modules installés",
-                    found_message="Modules trouvés",
-                    no_modules_message="Aucun module trouvé",
-                    starting_message="Démarrage de la signature",
-                    progress_message="Progression",
-                    signing_message="Signature",
-                    failed_message="Échec signature",
-                    all_signed_message="Tous les modules signés",
-                    signed_with_errors_message="Modules signés avec erreurs",
-                    signing_failed_message="Signature échouée",
-                    search_path=f"/lib/modules/{kernel_name}"
-                ) + f"""
-    # Régénérer l'initrd avec les modules signés
-    echo ''
-    echo '🔄 Régénération de l'initrd avec les modules signés...'
-    if sudo update-initramfs -u -k "{kernel_name}" 2>&1; then
-        echo "✅ Initrd régénéré avec succès"
-
-        # IMPORTANT: Re-créer le package .deb avec les modules signés
-        echo ''
-        echo '📦 Recréation du package .deb avec les modules signés...'
-
-        # Créer un répertoire temporaire pour extraire le .deb
-        TEMP_DEB_DIR=$(mktemp -d)
-
-        # Extraire le .deb
-        dpkg-deb -R $DEB_FILE "$TEMP_DEB_DIR"
-
-        # Remplacer les modules dans le .deb par les modules signés
-        rsync -a --delete /lib/modules/{kernel_name}/ "$TEMP_DEB_DIR/lib/modules/{kernel_name}/"
-
-        # Copier aussi l'initrd mis à jour
-        if [ -f "/boot/initrd.img-{kernel_name}" ]; then
-            mkdir -p "$TEMP_DEB_DIR/boot"
-            cp "/boot/initrd.img-{kernel_name}" "$TEMP_DEB_DIR/boot/" 2>/dev/null || true
-        fi
-
-        # Reconstruire le .deb
-        dpkg-deb -b "$TEMP_DEB_DIR" "$DEB_FILE.signed"
-
-        if [ $? -eq 0 ]; then
-            # Remplacer l'ancien .deb par le nouveau
-            mv "$DEB_FILE.signed" "$DEB_FILE"
-            echo "✅ Package .deb recréé avec les modules signés"
-        else
-            echo "❌ Erreur lors de la recréation du .deb"
-            rm -f "$DEB_FILE.signed"
-        fi
-
-        # Nettoyer
-        rm -rf "$TEMP_DEB_DIR"
-    else
-        echo "❌ Erreur lors de la régénération de l'initrd"
-        echo "⚠️  L'initrd peut contenir des modules non signés"
-    fi
-
-    echo ''
-    echo '================================='
-    echo '✅ Signature post-bindeb terminée (Debian)'
-    echo '================================='
-    echo ''
-else
-    echo "⚠️  Répertoire /lib/modules/{kernel_name} non trouvé, signature ignorée"
-fi
-"""
-                # Choisir le bon script de signature selon la distribution
-                if needs_post_bindeb_signing:
-                    # Debian : on ne signe PAS avant bindeb-pkg
-                    signing_before_bindeb = ""
-                    signing_after_bindeb = signing_after_bindeb_content
-                else:
-                    # Ubuntu : on signe AVANT bindeb-pkg
-                    signing_before_bindeb = signing_before_bindeb_content
-                    signing_after_bindeb = ""
 
     cmd = f"""
 cd '{linux_dir}' || exit 1
@@ -468,8 +282,8 @@ echo '{i18n._("compilation.header")}'
 echo '{i18n._("compilation.threads", count=jobs)}'
 echo '{i18n._("compilation.suffix", suffix=(suffix or i18n._("compilation.suffix_none")))}'
 echo '{i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no")))}'
-{"echo 'SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + "'" if sign_for_secureboot else ""}
-{"echo 'Distribution: Debian (CONFIG_MODULE_COMPRESS_NONE activé)'" if is_debian else "echo 'Distribution: Ubuntu (modules non compressés par défaut)'"}
+{"echo 'SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + " (AVANT bindeb-pkg)'" if sign_for_secureboot else ""}
+{"echo 'Distribution: Debian (CONFIG_MODULE_COMPRESS_NONE activé)'" if is_debian and sign_for_secureboot else ""}
 echo ''
 echo '{i18n._("compilation.starting")}'
 sleep 2
@@ -511,8 +325,6 @@ if [ $RESULT -ne 0 ]; then
     read
     exit $RESULT
 fi
-
-{signing_after_bindeb}
 
 # Étape 3: Déplacement des packages
 echo ''
