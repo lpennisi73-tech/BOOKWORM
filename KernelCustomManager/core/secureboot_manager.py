@@ -926,27 +926,33 @@ class SecureBootManager:
                 module_to_check = Path(temp_file.name)
 
             # Vérifier la signature avec modinfo
+            # NOTE: modinfo nécessite root pour lire les infos de signature (Debian 13)
+            # On utilise le helper pour éviter de multiples demandes de mot de passe
             result = subprocess.run(
-                ["modinfo", "-F", "sig_id", str(module_to_check)],
+                ["pkexec", "/usr/local/bin/kernelcustom-helper", "modinfo-check", str(module_to_check)],
                 capture_output=True, text=True, check=False
             )
 
-            sig_id = result.stdout.strip()
+            if result.returncode != 0:
+                return {'signed': False, 'signer': None, 'sig_id': None}
+
+            # Parser la sortie: SIG_ID:xxx\nSIGNER:yyy
+            output = result.stdout
+            sig_id = None
+            signer = None
+
+            for line in output.split('\n'):
+                if line.startswith('SIG_ID:'):
+                    sig_id = line.replace('SIG_ID:', '').strip()
+                elif line.startswith('SIGNER:'):
+                    signer = line.replace('SIGNER:', '').strip()
 
             if not sig_id:
                 return {'signed': False, 'signer': None, 'sig_id': None}
 
-            # Récupérer le signataire
-            result2 = subprocess.run(
-                ["modinfo", "-F", "signer", str(module_to_check)],
-                capture_output=True, text=True, check=False
-            )
-
-            signer = result2.stdout.strip()
-
             return {
                 'signed': True,
-                'signer': signer,
+                'signer': signer if signer else None,
                 'sig_id': sig_id
             }
         except:
