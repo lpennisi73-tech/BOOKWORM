@@ -842,19 +842,52 @@ class SecureBootManager:
         if not modules_dir.exists():
             return custom_kernels
 
-        for kernel_dir in modules_dir.iterdir():
-            if kernel_dir.is_dir() and "kernelcustom" in kernel_dir.name.lower():
-                # Compter les modules (incluant les modules compressés)
-                modules = []
-                for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
-                    modules.extend(kernel_dir.rglob(ext))
+        # Patterns des kernels officiels à exclure (Debian et Ubuntu)
+        # Ces kernels sont déjà signés par les distributeurs
+        stock_patterns = [
+            r'-amd64$',           # Debian: 6.8.12-amd64
+            r'-686$',             # Debian 32-bit: 6.8.12-686
+            r'-686-pae$',         # Debian 32-bit PAE: 6.8.12-686-pae
+            r'-cloud-amd64$',     # Debian cloud: 6.8.12-cloud-amd64
+            r'-rt-amd64$',        # Debian realtime: 6.8.12-rt-amd64
+            r'-generic$',         # Ubuntu: 6.5.0-27-generic
+            r'-lowlatency$',      # Ubuntu lowlatency: 6.5.0-27-lowlatency
+            r'-azure$',           # Ubuntu Azure: 6.5.0-1018-azure
+            r'-aws$',             # Ubuntu AWS: 6.5.0-1018-aws
+            r'-gcp$',             # Ubuntu GCP: 6.5.0-1018-gcp
+        ]
 
-                custom_kernels.append({
-                    'kernel_version': kernel_dir.name,
-                    'path': str(kernel_dir),
-                    'module_count': len(modules),
-                    'modules': [str(m) for m in modules]
-                })
+        import re
+
+        for kernel_dir in modules_dir.iterdir():
+            if not kernel_dir.is_dir():
+                continue
+
+            kernel_name = kernel_dir.name
+
+            # Vérifier si c'est un kernel stock (officiel)
+            is_stock = False
+            for pattern in stock_patterns:
+                if re.search(pattern, kernel_name):
+                    is_stock = True
+                    break
+
+            # Si c'est un kernel stock, on l'ignore
+            if is_stock:
+                continue
+
+            # Sinon, c'est un kernel personnalisé
+            # Compter les modules (incluant les modules compressés)
+            modules = []
+            for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
+                modules.extend(kernel_dir.rglob(ext))
+
+            custom_kernels.append({
+                'kernel_version': kernel_dir.name,
+                'path': str(kernel_dir),
+                'module_count': len(modules),
+                'modules': [str(m) for m in modules]
+            })
 
         return custom_kernels
 
