@@ -67,19 +67,19 @@ def show_compile_dialog(main_window):
     fakeroot_check.set_active(True)
     content.pack_start(fakeroot_check, False, False, 0)
 
-    # SecureBoot signing option
+    # SecureBoot signing option (Temporairement désactivé dans le GUI - À réactiver dans une prochaine version)
     sb_manager = main_window.secureboot_manager
     secureboot_check = None
 
-    if sb_manager.should_prompt_for_signing():
-        secureboot_check = Gtk.CheckButton(label=i18n._("dialog.compile.sign_for_secureboot"))
-        secureboot_check.set_active(False)
-        content.pack_start(secureboot_check, False, False, 0)
+    # if sb_manager.should_prompt_for_signing():
+    #     secureboot_check = Gtk.CheckButton(label=i18n._("dialog.compile.sign_for_secureboot"))
+    #     secureboot_check.set_active(False)
+    #     content.pack_start(secureboot_check, False, False, 0)
 
-        sb_info_label = Gtk.Label()
-        sb_info_label.set_markup(f"<small><i>{i18n._('dialog.compile.secureboot_info')}</i></small>")
-        sb_info_label.set_line_wrap(True)
-        content.pack_start(sb_info_label, False, False, 0)
+    #     sb_info_label = Gtk.Label()
+    #     sb_info_label.set_markup(f"<small><i>{i18n._('dialog.compile.secureboot_info')}</i></small>")
+    #     sb_info_label.set_line_wrap(True)
+    #     content.pack_start(sb_info_label, False, False, 0)
 
     # Info
     info_label = Gtk.Label()
