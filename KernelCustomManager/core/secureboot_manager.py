@@ -261,6 +261,30 @@ class SecureBootManager:
             except Exception:
                 return {'enrolled_output': '', 'pending_output': ''}
 
+    def _get_local_cert_fingerprint(self):
+        """
+        Extrait le fingerprint SHA1 du certificat MOK local
+        Returns: str (fingerprint format XX:XX:XX:...) ou None si erreur
+        """
+        mok_cert = self.keys_dir / "MOK.der"
+
+        if not mok_cert.exists():
+            return None
+
+        try:
+            result = subprocess.run(
+                ["openssl", "x509", "-in", str(mok_cert), "-inform", "DER", "-noout", "-fingerprint", "-sha1"],
+                capture_output=True, text=True, check=True
+            )
+            # Output format: "SHA1 Fingerprint=XX:XX:XX:..."
+            fingerprint_line = result.stdout.strip()
+            if "=" in fingerprint_line:
+                fingerprint = fingerprint_line.split("=", 1)[1].strip()
+                return fingerprint.lower()  # Normaliser en minuscules
+            return None
+        except:
+            return None
+
     def check_mok_enrolled(self):
         """
         Vérifie si une clé MOK est déjà enrollée
@@ -278,18 +302,49 @@ class SecureBootManager:
                     'message': 'No MOK keys enrolled'
                 }
 
-            # Chercher notre clé (supporte différents formats de nom)
+            # Méthode 1 : Comparer les fingerprints (le plus fiable)
+            local_fingerprint = self._get_local_cert_fingerprint()
+            if local_fingerprint:
+                # Parser la sortie pour trouver le certificat avec le bon fingerprint
+                lines = output.split('\n')
+                current_cert_cn = None
+                current_cert_fingerprint = None
+
+                for i, line in enumerate(lines):
+                    # Détecter une nouvelle clé
+                    if line.strip().startswith('[key '):
+                        current_cert_cn = None
+                        current_cert_fingerprint = None
+
+                    # Capturer le fingerprint
+                    if 'SHA1 Fingerprint:' in line:
+                        fp = line.split('SHA1 Fingerprint:')[1].strip().lower()
+                        current_cert_fingerprint = fp
+
+                    # Capturer le CN
+                    if 'Subject:' in line and 'CN=' in line:
+                        cn_part = line.split('CN=')[1].split(',')[0].split('/')[0].strip()
+                        current_cert_cn = cn_part
+
+                    # Vérifier si c'est notre certificat
+                    if current_cert_fingerprint and current_cert_fingerprint == local_fingerprint:
+                        return {
+                            'status': 'enrolled',
+                            'key_found': True,
+                            'cn_name': current_cert_cn,
+                            'message': f'MOK key is already enrolled (CN={current_cert_cn})',
+                            'fingerprint': local_fingerprint
+                        }
+
+            # Méthode 2 : Fallback sur la recherche par nom (rétrocompatibilité)
+            # Utile si le certificat local n'existe pas encore
             output_lower = output.lower()
-            # Formats supportés :
-            # - "kernelcustom" (ancien format, tout attaché)
-            # - "kernel custom" (nouveau format, avec espace)
-            # - "kernel custom mok key" (format complet)
-            if "kernelcustom" in output_lower or "kernel custom" in output_lower:
+            if "kernelcustom" in output_lower or "keernelcustom" in output_lower or "kernel custom" in output_lower:
                 return {
                     'status': 'enrolled',
                     'key_found': True,
                     'cn_name': 'kernelcustom',
-                    'message': 'MOK key is already enrolled'
+                    'message': 'MOK key is already enrolled (detected by name)'
                 }
 
             return {
