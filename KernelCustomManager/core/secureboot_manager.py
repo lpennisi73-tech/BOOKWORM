@@ -1228,7 +1228,7 @@ echo "FAILED:$failed"
         candidates = []
         for vmlinuz_file in boot_dir.glob(f"vmlinuz-{base_version}*"):
             # Exclure les backups et fichiers temporaires
-            if any(suffix in vmlinuz_file.name for suffix in ['.unsigned', '.old', '.bak', '.signed']):
+            if any(suffix in vmlinuz_file.name for suffix in ['.old', '.bak', '.signed']):
                 logging.debug(f"Skipping backup/temp file: {vmlinuz_file}")
                 continue
 
@@ -1354,11 +1354,6 @@ fi
 if [ ! -f "$VMLINUZ" ]; then
     echo "ERROR: vmlinuz not found: $VMLINUZ"
     exit 1
-fi
-
-# Créer backup si nécessaire
-if [ ! -f "${{VMLINUZ}}.unsigned" ]; then
-    cp "$VMLINUZ" "${{VMLINUZ}}.unsigned"
 fi
 
 # Signer l'image
@@ -2143,11 +2138,6 @@ VMLINUZ="{vmlinuz_path.resolve()}"
 vmlinuz_signed=0
 
 echo "PROGRESS_VMLINUZ:signing"
-
-# Créer backup si nécessaire
-if [ ! -f "${{VMLINUZ}}.unsigned" ]; then
-    cp "$VMLINUZ" "${{VMLINUZ}}.unsigned"
-fi
 
 # Signer l'image
 if sbsign --key "$MOK_PRIV" --cert "$MOK_CERT_PEM" --output "${{VMLINUZ}}.signed" "$VMLINUZ" 2>&1; then

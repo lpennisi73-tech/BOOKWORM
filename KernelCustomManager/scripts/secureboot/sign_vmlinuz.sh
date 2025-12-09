@@ -89,12 +89,6 @@ for vmlinuz in ${CUSTOM_KERNELS}; do
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}Signature de: ${kernel_name}${NC}"
 
-    # Créer une backup
-    if [ ! -f "${vmlinuz}.unsigned" ]; then
-        cp "${vmlinuz}" "${vmlinuz}.unsigned"
-        echo -e "   ${GREEN}✅ Backup créée: ${kernel_name}.unsigned${NC}"
-    fi
-
     # Signer le kernel
     if sbsign --key "${PRIV_KEY}" --cert "${CERT}" --output "${vmlinuz}.signed" "${vmlinuz}" 2>/dev/null; then
         # Remplacer l'original par la version signée
