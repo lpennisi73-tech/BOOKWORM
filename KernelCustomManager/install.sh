@@ -43,9 +43,6 @@ case "$DISTRO" in
             debhelper-compat \
             libdw-dev rsync \
             gawk dkms
-
-        # ImageMagick (optionnel - pour générer les icônes en différentes tailles)
-        sudo apt install -y imagemagick 2>/dev/null || echo "   ⚠️  ImageMagick non installé (optionnel)"
         ;;
     
     fedora)
@@ -60,9 +57,6 @@ case "$DISTRO" in
             ncurses-devel \
             fakeroot rpm-build \
             curl tar xz
-
-        # ImageMagick (optionnel - pour générer les icônes en différentes tailles)
-        sudo dnf install -y ImageMagick 2>/dev/null || echo "   ⚠️  ImageMagick non installé (optionnel)"
         ;;
     
     arch|manjaro)
@@ -77,9 +71,6 @@ case "$DISTRO" in
             ncurses \
             fakeroot \
             curl tar xz
-
-        # ImageMagick (optionnel - pour générer les icônes en différentes tailles)
-        sudo pacman -S --noconfirm imagemagick 2>/dev/null || echo "   ⚠️  ImageMagick non installé (optionnel)"
         ;;
     
     *)
@@ -87,7 +78,6 @@ case "$DISTRO" in
         echo "Installez manuellement les dépendances:"
         echo "  - Python 3 + GTK 3 + libnotify"
         echo "  - Outils de compilation (gcc, make, etc.)"
-        echo "  - ImageMagick (optionnel - pour icônes multiples tailles)"
         ;;
 esac
 
@@ -122,40 +112,15 @@ else
     echo "      L'application fonctionnera mais demandera le mot de passe plus souvent"
 fi
 
-# Installer l'icône dans les répertoires standards
-echo "🖼️  Installation de l'icône..."
-INSTALL_DIR="$(pwd)"
-
-# Créer les répertoires pour les icônes
-mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
-mkdir -p "$HOME/.local/share/icons/hicolor/128x128/apps"
-mkdir -p "$HOME/.local/share/icons/hicolor/48x48/apps"
-
-# Copier l'icône PNG principale (256x256)
-cp "$INSTALL_DIR/icon.png" "$HOME/.local/share/icons/hicolor/256x256/apps/kernelcustom-manager.png"
-echo "   ✓ Icône 256x256 installée"
-
-# Générer les autres tailles si ImageMagick est disponible
-if command -v convert >/dev/null 2>&1; then
-    convert "$INSTALL_DIR/icon.png" -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
-    convert "$INSTALL_DIR/icon.png" -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
-    echo "   ✓ Icônes 128x128 et 48x48 générées"
-elif command -v magick >/dev/null 2>&1; then
-    magick "$INSTALL_DIR/icon.png" -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
-    magick "$INSTALL_DIR/icon.png" -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
-    echo "   ✓ Icônes 128x128 et 48x48 générées"
-else
-    echo "   ⚠️  ImageMagick non disponible - seule l'icône 256x256 sera installée"
-fi
-
 # Créer le lanceur d'application
 echo "🚀 Installation du lanceur d'application..."
+INSTALL_DIR="$(pwd)"
 DESKTOP_FILE="$HOME/.local/share/applications/kernelcustom.desktop"
 
 # Créer le répertoire s'il n'existe pas
 mkdir -p "$HOME/.local/share/applications"
 
-# Créer le fichier .desktop
+# Créer le fichier .desktop avec le chemin absolu vers l'icône
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Version=1.0
@@ -163,7 +128,7 @@ Type=Application
 Name=KernelCustom Manager
 Comment=Gestionnaire de kernels personnalisés
 Exec=python3 $INSTALL_DIR/kernelcustom_manager.py
-Icon=kernelcustom-manager
+Icon=$INSTALL_DIR/icon.png
 Terminal=false
 Categories=System;Settings;
 Keywords=kernel;compile;linux;
@@ -175,17 +140,12 @@ chmod +x "$DESKTOP_FILE"
 # S'assurer que le script Python est exécutable
 chmod +x "$INSTALL_DIR/kernelcustom_manager.py"
 
-# Mettre à jour le cache des icônes
-if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
-    echo "   ✓ Cache des icônes mis à jour"
-fi
-
 # Mettre à jour la base de données des applications
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    echo "   ✓ Base de données des applications mise à jour"
 fi
+
+echo "   ✓ Lanceur créé avec l'icône: $INSTALL_DIR/icon.png"
 
 echo "✅ Lanceur installé dans : $DESKTOP_FILE"
 echo "   Redémarrez votre session si le lanceur n'apparaît pas immédiatement"
