@@ -34,6 +34,7 @@ case "$DISTRO" in
             gir1.2-gtk-4.0 \
             gir1.2-notify-0.7 \
             libnotify-bin \
+            imagemagick \
             build-essential \
             bc bison flex \
             libssl-dev libelf-dev \
@@ -51,6 +52,7 @@ case "$DISTRO" in
             python3-gobject \
             gtk3 \
             libnotify \
+            ImageMagick \
             @development-tools \
             bc bison flex \
             openssl-devel elfutils-libelf-devel \
@@ -65,6 +67,7 @@ case "$DISTRO" in
             python-gobject \
             gtk3 \
             libnotify \
+            imagemagick \
             base-devel \
             bc bison flex \
             openssl elfutils \
@@ -77,6 +80,7 @@ case "$DISTRO" in
         echo "⚠️  Distribution $DISTRO non supportée automatiquement"
         echo "Installez manuellement les dépendances:"
         echo "  - Python 3 + GTK 3 + libnotify"
+        echo "  - ImageMagick (pour la génération des icônes)"
         echo "  - Outils de compilation (gcc, make, etc.)"
         ;;
 esac
@@ -112,9 +116,37 @@ else
     echo "      L'application fonctionnera mais demandera le mot de passe plus souvent"
 fi
 
-# Créer le lanceur d'application
-echo "🖼️  Installation du lanceur d'application..."
+# Installer l'icône dans les répertoires standards
+echo "🖼️  Installation de l'icône..."
 INSTALL_DIR="$(pwd)"
+
+# Créer les répertoires pour les icônes
+mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
+mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
+mkdir -p "$HOME/.local/share/icons/hicolor/128x128/apps"
+mkdir -p "$HOME/.local/share/icons/hicolor/48x48/apps"
+
+# Copier l'icône SVG
+cp "$INSTALL_DIR/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/kernelcustom-manager.svg"
+echo "   ✓ Icône SVG installée"
+
+# Convertir en PNG si convert/magick est disponible
+if command -v convert >/dev/null 2>&1; then
+    convert -background none "$INSTALL_DIR/icon.svg" -resize 256x256 "$HOME/.local/share/icons/hicolor/256x256/apps/kernelcustom-manager.png" 2>/dev/null || true
+    convert -background none "$INSTALL_DIR/icon.svg" -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
+    convert -background none "$INSTALL_DIR/icon.svg" -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
+    echo "   ✓ Icônes PNG générées (256x256, 128x128, 48x48)"
+elif command -v magick >/dev/null 2>&1; then
+    magick "$INSTALL_DIR/icon.svg" -background none -resize 256x256 "$HOME/.local/share/icons/hicolor/256x256/apps/kernelcustom-manager.png" 2>/dev/null || true
+    magick "$INSTALL_DIR/icon.svg" -background none -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
+    magick "$INSTALL_DIR/icon.svg" -background none -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
+    echo "   ✓ Icônes PNG générées (256x256, 128x128, 48x48)"
+else
+    echo "   ⚠️  ImageMagick non installé, icônes PNG non générées (optionnel)"
+fi
+
+# Créer le lanceur d'application
+echo "🚀 Installation du lanceur d'application..."
 DESKTOP_FILE="$HOME/.local/share/applications/kernelcustom.desktop"
 
 # Créer le répertoire s'il n'existe pas
@@ -128,7 +160,7 @@ Type=Application
 Name=KernelCustom Manager
 Comment=Gestionnaire de kernels personnalisés
 Exec=python3 $INSTALL_DIR/kernelcustom_manager.py
-Icon=$INSTALL_DIR/icon.svg
+Icon=kernelcustom-manager
 Terminal=false
 Categories=System;Settings;
 Keywords=kernel;compile;linux;
@@ -140,14 +172,16 @@ chmod +x "$DESKTOP_FILE"
 # S'assurer que le script Python est exécutable
 chmod +x "$INSTALL_DIR/kernelcustom_manager.py"
 
+# Mettre à jour le cache des icônes
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    echo "   ✓ Cache des icônes mis à jour"
+fi
+
 # Mettre à jour la base de données des applications
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-fi
-
-# Forcer le rafraîchissement du cache (important pour Debian 13)
-if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    gtk-update-icon-cache -f -t ~/.local/share/icons 2>/dev/null || true
+    echo "   ✓ Base de données des applications mise à jour"
 fi
 
 echo "✅ Lanceur installé dans : $DESKTOP_FILE"
