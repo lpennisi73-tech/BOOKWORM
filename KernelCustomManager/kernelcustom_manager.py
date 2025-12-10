@@ -17,7 +17,7 @@ def main():
     """Point d'entrée principal"""
     # Définir le nom de l'application pour GNOME Shell
     # Cela permet à GNOME de lier l'application au fichier .desktop
-    GLib.set_prgname("kernelcustom-manager")
+    GLib.set_prgname("KernelCustom Manager")
     GLib.set_application_name("KernelCustom Manager")
 
     print("KernelCustom Manager - Version Python/GTK")
