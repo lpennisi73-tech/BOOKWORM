@@ -25,16 +25,29 @@ class KernelManagerWindow(Gtk.Window):
         self.kernel_manager = KernelManager()
         self.secureboot_manager = SecureBootManager()
         self.dialogs = DialogHelper(self)
-        
-        # Icône
+
+        # Définir le nom de l'application pour GNOME Shell
+        self.set_wmclass("KernelCustom Manager", "KernelCustom Manager")
+
+        # Icône de la fenêtre et de la barre des tâches
         try:
-            icon_path = Path(__file__).parent.parent / "icon.svg"
+            # Essayer icon.png d'abord (plus léger et plus compatible)
+            icon_path = Path(__file__).parent.parent / "icon.png"
             if icon_path.exists():
                 self.set_icon_from_file(str(icon_path))
+                # Définir aussi comme icône par défaut pour toutes les fenêtres
+                Gtk.Window.set_default_icon_from_file(str(icon_path))
             else:
-                self.set_icon_name("system-software-update")
-        except:
-            pass
+                # Fallback sur icon.svg
+                icon_path = Path(__file__).parent.parent / "icon.svg"
+                if icon_path.exists():
+                    self.set_icon_from_file(str(icon_path))
+                    Gtk.Window.set_default_icon_from_file(str(icon_path))
+                else:
+                    self.set_icon_name("system-software-update")
+        except Exception as e:
+            print(f"Erreur lors du chargement de l'icône: {e}")
+            self.set_icon_name("system-software-update")
         
         # Header Bar
         headerbar = Gtk.HeaderBar()
