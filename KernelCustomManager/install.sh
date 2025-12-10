@@ -132,6 +132,7 @@ Icon=$INSTALL_DIR/icon.png
 Terminal=false
 Categories=System;Settings;
 Keywords=kernel;compile;linux;
+StartupWMClass=KernelCustom Manager
 EOF
 
 # Rendre le fichier .desktop exécutable
