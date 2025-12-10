@@ -34,7 +34,6 @@ case "$DISTRO" in
             gir1.2-gtk-4.0 \
             gir1.2-notify-0.7 \
             libnotify-bin \
-            imagemagick \
             build-essential \
             bc bison flex \
             libssl-dev libelf-dev \
@@ -44,6 +43,9 @@ case "$DISTRO" in
             debhelper-compat \
             libdw-dev rsync \
             gawk dkms
+
+        # ImageMagick (optionnel - pour générer les icônes en différentes tailles)
+        sudo apt install -y imagemagick 2>/dev/null || echo "   ⚠️  ImageMagick non installé (optionnel)"
         ;;
     
     fedora)
@@ -52,13 +54,15 @@ case "$DISTRO" in
             python3-gobject \
             gtk3 \
             libnotify \
-            ImageMagick \
             @development-tools \
             bc bison flex \
             openssl-devel elfutils-libelf-devel \
             ncurses-devel \
             fakeroot rpm-build \
             curl tar xz
+
+        # ImageMagick (optionnel - pour générer les icônes en différentes tailles)
+        sudo dnf install -y ImageMagick 2>/dev/null || echo "   ⚠️  ImageMagick non installé (optionnel)"
         ;;
     
     arch|manjaro)
@@ -67,21 +71,23 @@ case "$DISTRO" in
             python-gobject \
             gtk3 \
             libnotify \
-            imagemagick \
             base-devel \
             bc bison flex \
             openssl elfutils \
             ncurses \
             fakeroot \
             curl tar xz
+
+        # ImageMagick (optionnel - pour générer les icônes en différentes tailles)
+        sudo pacman -S --noconfirm imagemagick 2>/dev/null || echo "   ⚠️  ImageMagick non installé (optionnel)"
         ;;
     
     *)
         echo "⚠️  Distribution $DISTRO non supportée automatiquement"
         echo "Installez manuellement les dépendances:"
         echo "  - Python 3 + GTK 3 + libnotify"
-        echo "  - ImageMagick (pour la génération des icônes)"
         echo "  - Outils de compilation (gcc, make, etc.)"
+        echo "  - ImageMagick (optionnel - pour icônes multiples tailles)"
         ;;
 esac
 
@@ -121,28 +127,25 @@ echo "🖼️  Installation de l'icône..."
 INSTALL_DIR="$(pwd)"
 
 # Créer les répertoires pour les icônes
-mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
 mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
 mkdir -p "$HOME/.local/share/icons/hicolor/128x128/apps"
 mkdir -p "$HOME/.local/share/icons/hicolor/48x48/apps"
 
-# Copier l'icône SVG
-cp "$INSTALL_DIR/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/kernelcustom-manager.svg"
-echo "   ✓ Icône SVG installée"
+# Copier l'icône PNG principale (256x256)
+cp "$INSTALL_DIR/icon.png" "$HOME/.local/share/icons/hicolor/256x256/apps/kernelcustom-manager.png"
+echo "   ✓ Icône 256x256 installée"
 
-# Convertir en PNG si convert/magick est disponible
+# Générer les autres tailles si ImageMagick est disponible
 if command -v convert >/dev/null 2>&1; then
-    convert -background none "$INSTALL_DIR/icon.svg" -resize 256x256 "$HOME/.local/share/icons/hicolor/256x256/apps/kernelcustom-manager.png" 2>/dev/null || true
-    convert -background none "$INSTALL_DIR/icon.svg" -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
-    convert -background none "$INSTALL_DIR/icon.svg" -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
-    echo "   ✓ Icônes PNG générées (256x256, 128x128, 48x48)"
+    convert "$INSTALL_DIR/icon.png" -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
+    convert "$INSTALL_DIR/icon.png" -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
+    echo "   ✓ Icônes 128x128 et 48x48 générées"
 elif command -v magick >/dev/null 2>&1; then
-    magick "$INSTALL_DIR/icon.svg" -background none -resize 256x256 "$HOME/.local/share/icons/hicolor/256x256/apps/kernelcustom-manager.png" 2>/dev/null || true
-    magick "$INSTALL_DIR/icon.svg" -background none -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
-    magick "$INSTALL_DIR/icon.svg" -background none -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
-    echo "   ✓ Icônes PNG générées (256x256, 128x128, 48x48)"
+    magick "$INSTALL_DIR/icon.png" -resize 128x128 "$HOME/.local/share/icons/hicolor/128x128/apps/kernelcustom-manager.png" 2>/dev/null || true
+    magick "$INSTALL_DIR/icon.png" -resize 48x48 "$HOME/.local/share/icons/hicolor/48x48/apps/kernelcustom-manager.png" 2>/dev/null || true
+    echo "   ✓ Icônes 128x128 et 48x48 générées"
 else
-    echo "   ⚠️  ImageMagick non installé, icônes PNG non générées (optionnel)"
+    echo "   ⚠️  ImageMagick non disponible - seule l'icône 256x256 sera installée"
 fi
 
 # Créer le lanceur d'application
