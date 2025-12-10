@@ -133,6 +133,7 @@ Terminal=false
 Categories=System;Settings;
 Keywords=kernel;compile;linux;
 StartupWMClass=KernelCustom Manager
+StartupNotify=true
 EOF
 
 # Rendre le fichier .desktop exécutable
