@@ -45,6 +45,7 @@
   "message": {
     "error": {
       "title": "Error",
+      "operation": "Operation failed",
       "select_kernel": "Please select a kernel to remove",
       "active_kernel": "Cannot remove the active kernel!\n\nActive kernel: {kernel}\n\nReboot to another kernel first.",
       "select_package": "Please select a package to install",
@@ -87,6 +88,7 @@
     },
     "success": {
       "title": "Success",
+      "operation": "Operation successful",
       "kernel_deleted": "Kernel and associated packages removed:\n\n• {packages}",
       "kernel_downloaded": "Kernel {version} downloaded!",
       "already_updated": "You already have the latest version: {version}",

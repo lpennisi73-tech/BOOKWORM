@@ -45,6 +45,7 @@
   "message": {
     "error": {
       "title": "Erreur",
+      "operation": "L'opération a échoué",
       "select_kernel": "Veuillez sélectionner un kernel à supprimer",
       "active_kernel": "Impossible de supprimer le kernel actif !\n\nKernel actif: {kernel}\n\nRedémarrez sur un autre kernel avant.",
       "select_package": "Veuillez sélectionner un paquet à installer",
@@ -87,6 +88,7 @@
     },
     "success": {
       "title": "Succès",
+      "operation": "Opération réussie",
       "kernel_deleted": "Kernel et paquets associés supprimés :\n\n• {packages}",
       "kernel_downloaded": "Kernel {version} téléchargé !",
       "already_updated": "Vous avez déjà la dernière version : {version}",
