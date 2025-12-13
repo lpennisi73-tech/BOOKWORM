@@ -243,15 +243,45 @@ remove_sources() {
         fi
     fi
     
-    # Supprimer les répertoires
-    print_info "Suppression de $src_path"
-    rm -rf "$src_path"
-    
-    if [ -d "$headers_path" ]; then
-        print_info "Suppression de $headers_path"
-        rm -rf "$headers_path"
+    # Supprimer les répertoires/liens
+    if [ -L "$src_path" ]; then
+        # C'est un lien symbolique (créé par 'link')
+        print_info "Suppression du lien symbolique: $src_path"
+        rm "$src_path"
+        print_success "Lien supprimé"
+    elif [ -d "$src_path" ]; then
+        # C'est un répertoire réel (créé par 'install')
+        print_info "Suppression du répertoire: $src_path"
+        rm -rf "$src_path"
+        print_success "Répertoire supprimé"
     fi
-    
+
+    # Pour les headers : NE supprimer QUE si c'est un lien symbolique
+    # Ne JAMAIS supprimer les vrais headers système !
+    if [ -e "$headers_path" ]; then
+        if [ -L "$headers_path" ]; then
+            # C'est un lien symbolique, on peut le supprimer
+            print_info "Suppression du lien headers: $headers_path"
+            rm "$headers_path"
+            print_success "Lien headers supprimé"
+        else
+            # C'est un répertoire réel - probablement des headers système
+            print_warning "ATTENTION: $headers_path n'est pas un lien symbolique"
+            print_warning "Ce sont probablement des headers système installés."
+            print_warning "Ils ne seront PAS supprimés automatiquement."
+            echo ""
+            read -p "Voulez-vous vraiment supprimer ce répertoire ? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Suppression du répertoire headers: $headers_path"
+                rm -rf "$headers_path"
+                print_success "Répertoire headers supprimé"
+            else
+                print_info "Headers conservés: $headers_path"
+            fi
+        fi
+    fi
+
     print_success "Suppression terminée!"
 }
 
@@ -389,6 +419,84 @@ link_sources() {
     echo "✓ DKMS pourra compiler les modules pour: $full_version"
 }
 
+# Fonction pour supprimer les liens symboliques (créés par link_sources)
+unlink_sources() {
+    local version="$1"
+
+    if [ -z "$version" ]; then
+        print_error "Version non spécifiée"
+        echo "Usage: $0 unlink <version>"
+        echo "Exemple: $0 unlink 6.16.9-kernelcustom"
+        exit 1
+    fi
+
+    # Vérifier les droits root
+    if [ "$EUID" -ne 0 ]; then
+        print_warning "Ce script nécessite les droits root"
+        exec sudo "$0" unlink "$version"
+        exit $?
+    fi
+
+    local src_link="$USR_SRC/linux-$version"
+    local headers_link="$USR_SRC/linux-headers-$version"
+    local found_something=false
+
+    print_info "Suppression des liens symboliques pour: $version"
+    echo ""
+
+    # Vérifier et supprimer le lien des sources
+    if [ -e "$src_link" ]; then
+        if [ -L "$src_link" ]; then
+            print_info "Suppression du lien: $src_link -> $(readlink "$src_link")"
+            rm "$src_link"
+            print_success "Lien supprimé: $src_link"
+            found_something=true
+        else
+            print_error "$src_link existe mais n'est PAS un lien symbolique !"
+            print_error "C'est un répertoire réel. Utilisez 'remove' pour le supprimer."
+            exit 1
+        fi
+    fi
+
+    # Vérifier et supprimer le lien des headers SEULEMENT si c'est un lien
+    if [ -e "$headers_link" ]; then
+        if [ -L "$headers_link" ]; then
+            print_info "Suppression du lien headers: $headers_link -> $(readlink "$headers_link")"
+            rm "$headers_link"
+            print_success "Lien supprimé: $headers_link"
+            found_something=true
+        else
+            print_warning "$headers_link existe mais n'est PAS un lien symbolique"
+            print_warning "Ce sont probablement des headers système. Ils ne seront PAS supprimés."
+        fi
+    fi
+
+    # Supprimer les liens principaux s'ils pointent vers cette version
+    if [ -L "$USR_SRC/linux" ]; then
+        local target=$(readlink "$USR_SRC/linux")
+        if [ "$target" = "linux-$version" ]; then
+            print_info "Suppression du lien principal: $USR_SRC/linux"
+            rm "$USR_SRC/linux"
+            print_success "Lien principal supprimé"
+        fi
+    fi
+
+    if [ -L "$USR_SRC/linux-headers" ]; then
+        local target=$(readlink "$USR_SRC/linux-headers")
+        if [ "$target" = "linux-headers-$version" ]; then
+            print_info "Suppression du lien principal: $USR_SRC/linux-headers"
+            rm "$USR_SRC/linux-headers"
+            print_success "Lien principal headers supprimé"
+        fi
+    fi
+
+    if [ "$found_something" = true ]; then
+        print_success "Suppression des liens terminée !"
+    else
+        print_warning "Aucun lien trouvé pour la version: $version"
+    fi
+}
+
 # Fonction pour lister les sources
 list_sources() {
     echo "=== Sources dans KernelCustom Manager ==="
@@ -423,22 +531,28 @@ show_help() {
 Usage: $0 [COMMANDE] [OPTIONS]
 
 Commandes:
-  install <version>   Copier les sources dans /usr/src/
-  link <version>      Créer des liens symboliques dans /usr/src/ (économise l'espace)
-  remove <version>    Supprimer les sources/liens de /usr/src/
-  list               Lister toutes les sources disponibles
-  help               Afficher cette aide
+  install <version>             Copier les sources dans /usr/src/
+  link <version> [full-version] Créer des liens symboliques dans /usr/src/ (recommandé)
+  unlink <version>              Supprimer uniquement les liens symboliques
+  remove <version>              Supprimer les sources/liens de /usr/src/
+  list                          Lister toutes les sources disponibles
+  help                          Afficher cette aide
 
 Exemples:
-  $0 install 6.11.6                  # Copie les sources
-  $0 link 6.11.6                     # Crée juste des liens (recommandé)
-  $0 link 6.16.9 6.16.9-kernelcustom # Crée des liens avec suffixe (recommandé)
-  $0 remove 6.11.6
-  $0 list
+  $0 link 6.16.9 6.16.9-kernelcustom # Crée des liens avec suffixe (RECOMMANDÉ)
+  $0 link 6.11.6                     # Crée des liens sans suffixe
+  $0 unlink 6.16.9-kernelcustom      # Supprime les liens UNIQUEMENT
+  $0 install 6.11.6                  # Copie complète des sources
+  $0 remove 6.11.6                   # Supprime sources ET headers (prudent)
+  $0 list                            # Liste toutes les versions
 
-Différences:
+Différences importantes:
+  link    : Crée des liens symboliques (économise l'espace, RECOMMANDÉ)
+            → /usr/src/linux -> ~/KernelCustomManager/build/sources/VERSION
+  unlink  : Supprime UNIQUEMENT les liens symboliques créés par 'link'
+            → Ne touche JAMAIS aux vrais headers système
   install : Copie complète des sources (prend de l'espace)
-  link    : Lien symbolique (économise l'espace, recommandé)
+  remove  : Supprime les sources. Protège les vrais headers système.
 
 EOF
 }
@@ -450,6 +564,9 @@ case "${1:-}" in
         ;;
     link)
         link_sources "$2" "$3"
+        ;;
+    unlink)
+        unlink_sources "$2"
         ;;
     remove)
         remove_sources "$2"

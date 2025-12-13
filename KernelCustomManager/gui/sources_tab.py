@@ -366,9 +366,19 @@ def remove_from_usr_src(main_window, view, available_store, installed_store):
 
     version = model[treeiter][0]
 
+    # Détecter si c'est un lien symbolique ou un répertoire
+    target_path = Path("/usr/src") / f"linux-{version}"
+    is_symlink = target_path.is_symlink()
+
+    # Utiliser le bon message de confirmation
+    if is_symlink:
+        confirm_msg = i18n._("message.confirm.unlink_sources", version=version)
+    else:
+        confirm_msg = i18n._("message.confirm.delete_sources", version=version)
+
     if not main_window.dialogs.show_question(
         i18n._("message.confirm.title"),
-        i18n._("message.confirm.delete_sources", version=version)
+        confirm_msg
     ):
         return
 
@@ -389,32 +399,35 @@ def remove_from_usr_src(main_window, view, available_store, installed_store):
     status_label = Gtk.Label()
     status_label.set_text(i18n._("dialog.delete_sources.status"))
     content.pack_start(status_label, False, False, 0)
-    
+
     progress = Gtk.ProgressBar()
     progress.set_show_text(True)
     progress.set_pulse_step(0.1)
     content.pack_start(progress, False, False, 0)
-    
+
     dialog.show_all()
-    
+
     def remove_thread():
         try:
             def pulse_progress():
                 progress.pulse()
                 return True
-            
+
             pulse_id = GLib.timeout_add(100, pulse_progress)
-            
+
             script_path = Path(__file__).parent.parent / "manage_kernel_sources.sh"
-            
+
+            # Choisir la bonne commande selon le type
+            command = "unlink" if is_symlink else "remove"
+
             process = subprocess.Popen(
-                ["pkexec", str(script_path), "remove", version],
+                ["pkexec", str(script_path), command, version],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
             )
-            
+
             stdout, stderr = process.communicate(input="y\n")
             
             GLib.source_remove(pulse_id)

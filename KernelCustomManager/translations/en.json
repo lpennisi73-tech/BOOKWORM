@@ -84,7 +84,8 @@
       "clear_history": "Clear all compilation history?\n\nThis action is irreversible.",
       "create_link": "{description}\n\nCreate this symbolic link in /usr/src/?",
       "copy_sources": "Copy kernel {version} sources to /usr/src/?\n\nThis will take ~1-2 GB of disk space.",
-      "delete_sources": "Remove kernel {version} sources from /usr/src/?\n\nThis action is irreversible!"
+      "delete_sources": "Remove kernel {version} sources from /usr/src/?\n\nThis action is irreversible!",
+      "unlink_sources": "Remove symbolic link for kernel {version} from /usr/src/?\n\nThis will only remove the link, not the sources."
     },
     "success": {
       "title": "Success",
