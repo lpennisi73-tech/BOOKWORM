@@ -225,20 +225,32 @@ remove_sources() {
         print_info "Opération annulée"
         exit 0
     fi
-    
+
+    # Sauvegarder la cible du lien/répertoire avant de le supprimer
+    local src_target=""
+    if [ -L "$src_path" ]; then
+        src_target=$(readlink "$src_path")
+    fi
+
     # Supprimer les liens symboliques si ils pointent vers cette version
     if [ -L "$USR_SRC/linux" ]; then
         local target=$(readlink "$USR_SRC/linux")
-        if [ "$target" = "linux-$version" ]; then
-            print_info "Suppression du lien $USR_SRC/linux"
+        # Extraire le nom de base avec expansion de paramètre (plus robuste que basename)
+        local target_basename="${target##*/}"
+
+        # Supprimer si le nom correspond OU si le lien pointe vers le même endroit
+        if [ "$target_basename" = "linux-$version" ] || [ "$target" = "$src_target" ]; then
+            print_info "Suppression du lien $USR_SRC/linux -> $target"
             rm "$USR_SRC/linux"
         fi
     fi
-    
+
     if [ -L "$USR_SRC/linux-headers" ]; then
         local target=$(readlink "$USR_SRC/linux-headers")
-        if [ "$target" = "linux-headers-$version" ]; then
-            print_info "Suppression du lien $USR_SRC/linux-headers"
+        # Extraire le nom de base avec expansion de paramètre
+        local target_basename="${target##*/}"
+        if [ "$target_basename" = "linux-headers-$version" ]; then
+            print_info "Suppression du lien $USR_SRC/linux-headers -> $target"
             rm "$USR_SRC/linux-headers"
         fi
     fi
@@ -354,8 +366,8 @@ link_sources() {
     if [ -L "$USR_SRC/linux" ]; then
         rm "$USR_SRC/linux"
     fi
-    ln -sf "$target_name" "$USR_SRC/linux"
-    print_success "Lien créé: $USR_SRC/linux -> $target_name"
+    ln -sf "$src_path" "$USR_SRC/linux"
+    print_success "Lien créé: $USR_SRC/linux -> $src_path"
     
     # Chercher les headers avec la version complète
     local headers_src=""
@@ -399,8 +411,8 @@ link_sources() {
         if [ -L "$USR_SRC/linux-headers" ]; then
             rm "$USR_SRC/linux-headers"
         fi
-        ln -sf "linux-headers-$full_version" "$USR_SRC/linux-headers"
-        print_success "Lien créé: $USR_SRC/linux-headers -> linux-headers-$full_version"
+        ln -sf "$headers_src" "$USR_SRC/linux-headers"
+        print_success "Lien créé: $USR_SRC/linux-headers -> $headers_src"
     else
         print_warning "Headers non trouvés pour: linux-headers-$full_version"
         print_info "Cherché dans:"
@@ -444,10 +456,16 @@ unlink_sources() {
     print_info "Suppression des liens symboliques pour: $version"
     echo ""
 
+    # Sauvegarder la cible du lien versionné avant de le supprimer
+    local src_link_target=""
+    if [ -L "$src_link" ]; then
+        src_link_target=$(readlink "$src_link")
+    fi
+
     # Vérifier et supprimer le lien des sources
     if [ -e "$src_link" ]; then
         if [ -L "$src_link" ]; then
-            print_info "Suppression du lien: $src_link -> $(readlink "$src_link")"
+            print_info "Suppression du lien: $src_link -> $src_link_target"
             rm "$src_link"
             print_success "Lien supprimé: $src_link"
             found_something=true
@@ -474,17 +492,25 @@ unlink_sources() {
     # Supprimer les liens principaux s'ils pointent vers cette version
     if [ -L "$USR_SRC/linux" ]; then
         local target=$(readlink "$USR_SRC/linux")
-        if [ "$target" = "linux-$version" ]; then
-            print_info "Suppression du lien principal: $USR_SRC/linux"
+        # Extraire le nom de base avec expansion de paramètre (plus robuste que basename)
+        local target_basename="${target##*/}"
+
+        # Supprimer si le nom correspond OU si le lien pointe vers le même endroit
+        if [ "$target_basename" = "linux-$version" ] || [ "$target" = "$src_link_target" ]; then
+            print_info "Suppression du lien principal: $USR_SRC/linux -> $target"
             rm "$USR_SRC/linux"
             print_success "Lien principal supprimé"
+            found_something=true
         fi
     fi
 
     if [ -L "$USR_SRC/linux-headers" ]; then
         local target=$(readlink "$USR_SRC/linux-headers")
-        if [ "$target" = "linux-headers-$version" ]; then
-            print_info "Suppression du lien principal: $USR_SRC/linux-headers"
+        # Extraire le nom de base avec expansion de paramètre
+        local target_basename="${target##*/}"
+
+        if [ "$target_basename" = "linux-headers-$version" ]; then
+            print_info "Suppression du lien principal: $USR_SRC/linux-headers -> $target"
             rm "$USR_SRC/linux-headers"
             print_success "Lien principal headers supprimé"
         fi

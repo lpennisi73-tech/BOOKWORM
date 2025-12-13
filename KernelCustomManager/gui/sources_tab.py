@@ -123,7 +123,9 @@ def refresh_sources(main_window, available_store, installed_store):
     linux_link = usr_src / "linux"
     if linux_link.is_symlink():
         target = linux_link.readlink()
-        active_link = str(target).replace("linux-", "")
+        # Extraire le nom de base du chemin (chemin complet ou relatif)
+        target_name = Path(target).name
+        active_link = target_name.replace("linux-", "")
     
     if usr_src.exists():
         for src in sorted(usr_src.glob("linux-[0-9]*")):
