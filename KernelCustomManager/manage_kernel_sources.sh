@@ -4,8 +4,25 @@
 
 set -e
 
+# Déterminer le répertoire build de KernelCustomManager
+# 1. Chercher la racine du repo git
+# 2. Sinon utiliser le chemin par défaut ~/KernelCustomManager/build
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build"
+
+# Essayer de trouver la racine du repo git
+GIT_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "")
+
+if [ -n "$GIT_ROOT" ] && [ -d "$GIT_ROOT/build/sources" ]; then
+    # Utiliser le build/ à la racine du repo git
+    BUILD_DIR="$GIT_ROOT/build"
+elif [ -d "$HOME/KernelCustomManager/build/sources" ]; then
+    # Utiliser le chemin par défaut (comme dans kernel_manager.py)
+    BUILD_DIR="$HOME/KernelCustomManager/build"
+else
+    # Fallback sur l'ancien comportement
+    BUILD_DIR="$SCRIPT_DIR/build"
+fi
+
 SOURCES_DIR="$BUILD_DIR/sources"
 USR_SRC="/usr/src"
 
