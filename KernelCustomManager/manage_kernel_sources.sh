@@ -9,15 +9,30 @@ set -e
 # 2. Sinon utiliser le chemin par défaut ~/KernelCustomManager/build
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Déterminer le vrai HOME de l'utilisateur (même avec pkexec/sudo)
+if [ -n "$PKEXEC_UID" ]; then
+    # Exécuté avec pkexec, récupérer le home de l'utilisateur original
+    REAL_USER=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+    REAL_HOME=$(getent passwd "$PKEXEC_UID" | cut -d: -f6)
+elif [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+    # Exécuté avec sudo
+    REAL_USER="$SUDO_USER"
+    REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+else
+    # Exécution normale
+    REAL_USER="$USER"
+    REAL_HOME="$HOME"
+fi
+
 # Essayer de trouver la racine du repo git
 GIT_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "")
 
 if [ -n "$GIT_ROOT" ] && [ -d "$GIT_ROOT/build/sources" ]; then
     # Utiliser le build/ à la racine du repo git
     BUILD_DIR="$GIT_ROOT/build"
-elif [ -d "$HOME/KernelCustomManager/build/sources" ]; then
+elif [ -d "$REAL_HOME/KernelCustomManager/build/sources" ]; then
     # Utiliser le chemin par défaut (comme dans kernel_manager.py)
-    BUILD_DIR="$HOME/KernelCustomManager/build"
+    BUILD_DIR="$REAL_HOME/KernelCustomManager/build"
 else
     # Fallback sur l'ancien comportement
     BUILD_DIR="$SCRIPT_DIR/build"
