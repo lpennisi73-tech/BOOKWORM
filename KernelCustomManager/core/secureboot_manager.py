@@ -13,6 +13,7 @@ import os
 import logging
 import threading
 import platform
+from utils.i18n import get_i18n
 
 # Configurer le logging
 log_file = Path.home() / "KernelCustomManager" / "build" / "secureboot" / "sign_debug.log"
@@ -54,6 +55,9 @@ class SecureBootManager:
         # Cache pour les données MOK (évite de demander le mot de passe plusieurs fois)
         self._mok_cache = None
         self._mok_cache_lock = threading.Lock()
+
+        # Initialiser i18n
+        self.i18n = get_i18n()
 
     def clear_mok_cache(self):
         """Vide le cache MOK pour forcer une nouvelle lecture"""
@@ -1785,10 +1789,10 @@ echo "SUCCESS"
         logging.debug("Step 1: Checking UEFI system...")
         if not self.is_uefi_system():
             diagnosis['issue_type'] = 'NOT_UEFI'
-            diagnosis['message'] = 'System is not using UEFI. SecureBoot requires UEFI.'
+            diagnosis['message'] = self.i18n._('secureboot.diag.not_uefi')
             diagnosis['solutions'] = [
-                'Convert to UEFI boot (advanced)',
-                'Disable SecureBoot and use Legacy boot'
+                self.i18n._('secureboot.diag.sol_convert_uefi'),
+                self.i18n._('secureboot.diag.sol_disable_sb_legacy')
             ]
             return diagnosis
 
@@ -1800,10 +1804,10 @@ echo "SUCCESS"
         logging.debug(f"SecureBoot status: {sb_status}")
         if not sb_status['enabled']:
             diagnosis['issue_type'] = 'SB_DISABLED'
-            diagnosis['message'] = 'SecureBoot is disabled in BIOS/UEFI'
+            diagnosis['message'] = self.i18n._('secureboot.diag.sb_disabled')
             diagnosis['solutions'] = [
-                'Enable SecureBoot in BIOS settings',
-                'Keep SecureBoot disabled (less secure)'
+                self.i18n._('secureboot.diag.sol_enable_sb'),
+                self.i18n._('secureboot.diag.sol_keep_sb_disabled')
             ]
             return diagnosis
 
@@ -1816,17 +1820,17 @@ echo "SUCCESS"
         if not mok_status['key_found']:
             if self.check_mok_pending():
                 diagnosis['issue_type'] = 'MOK_PENDING'
-                diagnosis['message'] = 'MOK key is pending enrollment. Reboot required.'
+                diagnosis['message'] = self.i18n._('secureboot.diag.mok_pending')
                 diagnosis['solutions'] = [
-                    'Reboot and follow MOK Manager instructions',
-                    'Cancel pending enrollment and re-enroll'
+                    self.i18n._('secureboot.diag.sol_reboot_mok'),
+                    self.i18n._('secureboot.diag.sol_cancel_reenroll')
                 ]
             else:
                 diagnosis['issue_type'] = 'MOK_NOT_ENROLLED'
-                diagnosis['message'] = 'MOK key is not enrolled. Cannot boot custom kernels.'
+                diagnosis['message'] = self.i18n._('secureboot.diag.mok_not_enrolled')
                 diagnosis['solutions'] = [
-                    'Enroll MOK key (automated wizard available)',
-                    'Disable SecureBoot to boot without signature'
+                    self.i18n._('secureboot.diag.sol_enroll_mok'),
+                    self.i18n._('secureboot.diag.sol_disable_sb')
                 ]
             return diagnosis
 
@@ -1852,7 +1856,10 @@ echo "SUCCESS"
                 if not modules_stats['is_signed'] and modules_stats['total_modules'] > 0:
                     kernel_issues.append({
                         'type': 'MODULES_UNSIGNED',
-                        'message': f"Modules not signed ({modules_stats['signed_count']}/{modules_stats['total_checked']} signed in sample)",
+                        'message': self.i18n._('secureboot.diag.modules_not_signed').format(
+                            signed=modules_stats['signed_count'],
+                            total=modules_stats['total_checked']
+                        ),
                         'details': modules_stats
                     })
 
@@ -1864,7 +1871,10 @@ echo "SUCCESS"
                 if initrd_check['success'] and not initrd_check['initrd_ok'] and initrd_check.get('modules_count', 0) > 0:
                     kernel_issues.append({
                         'type': 'INITRD_UNSIGNED_MODULES',
-                        'message': f"Initrd contains unsigned modules ({initrd_check.get('signed_count', 0)}/{initrd_check.get('checked_count', 0)} signed)",
+                        'message': self.i18n._('secureboot.diag.initrd_unsigned_modules').format(
+                            signed=initrd_check.get('signed_count', 0),
+                            total=initrd_check.get('checked_count', 0)
+                        ),
                         'details': initrd_check
                     })
                 elif not initrd_check['success']:
@@ -1879,7 +1889,7 @@ echo "SUCCESS"
                     if vmlinuz_check['success'] and not vmlinuz_check['is_signed']:
                         kernel_issues.append({
                             'type': 'VMLINUZ_UNSIGNED',
-                            'message': f"vmlinuz not signed",
+                            'message': self.i18n._('secureboot.diag.vmlinuz_not_signed'),
                             'details': vmlinuz_check
                         })
 
@@ -1905,9 +1915,9 @@ echo "SUCCESS"
 
                 # Solutions
                 diagnosis['solutions'] = [
-                    'Sign kernel modules and vmlinuz (use Signing tab)',
-                    'Regenerate initrd after signing modules',
-                    'Verify SecureBoot configuration'
+                    self.i18n._('secureboot.diag.sol_sign_modules'),
+                    self.i18n._('secureboot.diag.sol_regenerate_initrd'),
+                    self.i18n._('secureboot.diag.sol_verify_sb_config')
                 ]
 
                 return diagnosis
@@ -1915,7 +1925,7 @@ echo "SUCCESS"
         # Tout est OK !
         logging.info("Step 4: All kernels properly signed")
         diagnosis['issue_type'] = 'OK'
-        diagnosis['message'] = 'SecureBoot is properly configured. All custom kernels are signed.'
+        diagnosis['message'] = self.i18n._('secureboot.diag.all_ok')
         diagnosis['solutions'] = []
         return diagnosis
 

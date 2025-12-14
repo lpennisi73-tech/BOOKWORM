@@ -401,7 +401,7 @@
     "generate_key_now": "Voulez-vous générer une nouvelle clé de signature maintenant ?\n\nCela permettra de signer automatiquement les modules kernel.",
     "key_generated_success": "Clé de signature générée avec succès !",
     "sign_modules_now": "Voulez-vous signer les modules kernel maintenant ?",
-    "sign_modules": "Signer les modules kernel",
+    "sign_modules": "Signer les Modules",
     "select_signing_key": "Sélectionnez la clé à utiliser pour la signature :",
     "signing_in_progress": "Signature des modules en cours...",
     "signing_modules_before_packaging": "🔒 Signature des modules kernel pour SecureBoot...",
@@ -457,7 +457,6 @@
     "custom_kernels_detected": "kernel(s) custom détecté(s)",
     "modules": "modules",
     "also_sign_vmlinuz": "Signer aussi les images vmlinuz (recommandé pour SecureBoot)",
-    "sign_modules": "Signer les Modules",
     "no_kernel_selected": "Aucun kernel sélectionné",
     "signing_modules_for": "Signature des modules pour",
     "signing_vmlinuz_for": "Signature du vmlinuz pour",
@@ -468,6 +467,27 @@
     "vmlinuz_failed": "Images vmlinuz échouées",
     "all_signed_successfully": "Tous les fichiers ont été signés avec succès !",
     "next_steps_update_grub": "Prochaine étape : Exécutez 'sudo update-grub' et redémarrez.",
-    "some_signing_failed": "Certaines signatures ont échoué. Vérifiez les logs."
+    "some_signing_failed": "Certaines signatures ont échoué. Vérifiez les logs.",
+    "diag": {
+      "not_uefi": "Le système n'utilise pas UEFI. SecureBoot nécessite UEFI.",
+      "sol_convert_uefi": "Convertir en boot UEFI (avancé)",
+      "sol_disable_sb_legacy": "Désactiver SecureBoot et utiliser le boot Legacy",
+      "sb_disabled": "SecureBoot est désactivé dans le BIOS/UEFI",
+      "sol_enable_sb": "Activer SecureBoot dans les paramètres du BIOS",
+      "sol_keep_sb_disabled": "Garder SecureBoot désactivé (moins sécurisé)",
+      "mok_pending": "La clé MOK est en attente d'enrollment. Redémarrage requis.",
+      "sol_reboot_mok": "Redémarrer et suivre les instructions du MOK Manager",
+      "sol_cancel_reenroll": "Annuler l'enrollment en attente et réenroller",
+      "mok_not_enrolled": "La clé MOK n'est pas enrollée. Impossible de booter les kernels custom.",
+      "sol_enroll_mok": "Enroller la clé MOK (assistant automatisé disponible)",
+      "sol_disable_sb": "Désactiver SecureBoot pour booter sans signature",
+      "all_ok": "SecureBoot est correctement configuré. Tous les kernels custom sont signés.",
+      "modules_not_signed": "Modules non signés ({signed}/{total} signés dans l'échantillon)",
+      "initrd_unsigned_modules": "Initrd contient des modules non signés ({signed}/{total} signés)",
+      "vmlinuz_not_signed": "vmlinuz non signé",
+      "sol_sign_modules": "Signer les modules kernel et vmlinuz (utiliser l'onglet Signature)",
+      "sol_regenerate_initrd": "Régénérer l'initrd après la signature des modules",
+      "sol_verify_sb_config": "Vérifier la configuration SecureBoot"
+    }
   }
 }
