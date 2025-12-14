@@ -5,7 +5,7 @@ set -e
 
 echo "=========================================="
 echo "  KernelCustom Manager - Installation"
-echo "  Édition Professionnelle v2.2"
+echo "  Édition Professionnelle v2.3"
 echo "=========================================="
 echo ""
 

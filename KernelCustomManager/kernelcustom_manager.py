@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 KernelCustom Manager - Version Python/GTK
-Édition Professionnelle v2.2
+Édition Professionnelle v2.3
 Point d'entrée principal
 """
 
@@ -21,7 +21,7 @@ def main():
     GLib.set_application_name("KernelCustom Manager")
 
     print("KernelCustom Manager - Version Python/GTK")
-    print("Édition Professionnelle v2.2")
+    print("Édition Professionnelle v2.3")
     print("=" * 50)
 
     # Initialiser les notifications
