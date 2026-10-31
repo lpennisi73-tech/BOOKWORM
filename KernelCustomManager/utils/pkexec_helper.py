@@ -28,7 +28,7 @@ class PkexecHelper:
 
     NOT_INSTALLED_MSG = (
         "Le helper privilégié n'est pas installé "
-        f"({HELPER_DIR}). Lancez ./install.sh pour l'installer."
+        f"({HELPER_DIR}). Installez le paquet kernelcustom-manager."
     )
 
     # ---------- Bas niveau ----------

@@ -1,0 +1,4 @@
+# Fichiers produits par dpkg-buildpackage dans KernelCustomManager/ (écrits dans le dossier parent)
+/kernelcustom-manager_*.deb
+/kernelcustom-manager_*.buildinfo
+/kernelcustom-manager_*.changes

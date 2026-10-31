@@ -1,0 +1,10 @@
+kernelcustom-manager (3.0~dev1) unstable; urgency=medium
+
+  * Paquet Debian initial (debhelper) :
+    - application dans /usr/lib/kernelcustom-manager, lanceur /usr/bin ;
+    - helpers privilégiés dans /usr/libexec/kernelcustom-manager ;
+    - policy PolicyKit, fichier .desktop, icône et page de manuel.
+  * Interface GTK4 + libadwaita, helpers root en Python avec liste blanche,
+    dossier de travail XDG (~/.local/share/kernelcustom-manager).
+
+ -- Kenny-Tech <lpennisi73@gmail.com>  Sun, 01 Nov 2026 00:30:00 +0100

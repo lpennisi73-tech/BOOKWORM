@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+# Une installation NVIDIA programmée au prochain démarrage appellerait un
+# helper qui n'existera plus : on l'annule avant la suppression
+if [ "$1" = "remove" ] && [ -e /etc/systemd/system/kernelcustom-nvidia-install.service ]; then
+    /usr/libexec/kernelcustom-manager/kernelcustom-nvidia-installer cancel || true
+fi
+
+#DEBHELPER#
+
+exit 0

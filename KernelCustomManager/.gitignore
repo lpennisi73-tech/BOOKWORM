@@ -43,3 +43,12 @@ Thumbs.db
 *.tmp
 *.bak
 *.old
+
+# Construction du paquet Debian (dpkg-buildpackage)
+debian/kernelcustom-manager/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.debhelper.log
+debian/*.debhelper

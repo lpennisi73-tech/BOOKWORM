@@ -28,19 +28,19 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - [x] **5. Chemins centralisés** : `utils/paths.py` (code, traductions, icônes, runner, helpers, données XDG, configuration) + migration automatique de `~/KernelCustomManager/build`
 - [x] **6. Outil de nettoyage (logique)** : `core/cleanup_manager.py` (`scan()` / `clean()`, sans GTK) + traductions `cleanup.*`. **L'interface sera écrite en GTK4 à l'étape 7** (onglet ou dialogue « 🧹 Nettoyage »)
 - [x] **7. Portage GTK4 + libadwaita** (branche `gtk4`) : `Adw.Application`, fenêtre `Adw.ApplicationWindow` + `Adw.ViewStack`, dialogues asynchrones, `Gtk.ColumnView`, `Gio.Notification`, nouvel onglet « Nettoyage ». Voir « Interface GTK4 »
-- [ ] **8. Paquet .deb (TOUT À LA FIN)** : création de `debian/`, construction, `lintian`, test d'installation et de désinstallation. Supprimer `install.sh`, `uninstall-policykit.sh` et le dossier en double `KernelCustomManager/` (il ne contient que des `__init__.py` vides)
+- [x] **8. Paquet .deb** : `debian/` (debhelper 13, `dh-python`), `lintian` propre (y compris `--pedantic` et expérimental), installation, désinstallation et purge testées. `install.sh`, `uninstall-policykit.sh` et le dossier en double `KernelCustomManager/` sont supprimés. Voir « Paquet .deb »
 - [ ] **9. Release v3.0** : mise à jour de la version, du changelog Debian et de la doc
 
-> **Priorité : le portage de l'application (étapes 2 à 7).** Le paquet .deb vient tout à la fin, une fois l'app stabilisée en Python pur + GTK4. En attendant, l'app se lance depuis le dépôt git (`install.sh` reste utilisable jusqu'à l'étape 8, avec la policy polkit qui pointe vers le chemin du helper défini dans `utils/paths.py`).
+> L'app s'installe avec le paquet .deb. Pour développer, on peut toujours la lancer depuis le dépôt (`python3 kernelcustom_manager.py`) : elle utilise alors les helpers et la policy **installés par le paquet**.
 
 ## Opérations privilégiées (étape 3)
 
 - **Seul `utils/pkexec_helper.py` (`PkexecHelper`) appelle `pkexec`.** Interdit ailleurs : `pkexec` direct, `sudo`, `bash -c`, `shell=True`.
-- Le code des helpers est dans `helpers/` et ils sont installés dans `/usr/libexec/kernelcustom-manager/` (`root:root 0755`) par `install.sh` :
+- Le code des helpers est dans `helpers/` et ils sont installés dans `/usr/libexec/kernelcustom-manager/` (`root:root 0755`) par le paquet :
   - `kernelcustom-helper` : liste blanche (`apt-install`, `install-debs`, `remove-packages`, `reboot`, `mokutil-*`, `sign-kernel`). Policy `com.kernelcustom.manager.helper` en `auth_admin_keep`.
   - `kernelcustom-nvidia-installer` : `run`, `schedule`, `boot-install`, `cancel`, `uninstall`. Policy `com.kernelcustom.manager.nvidia` en `auth_admin`, qui redemande **toujours** le mot de passe. Le `.run` est copié dans `/var/lib/kernelcustom-manager/nvidia/` avant exécution.
 - Les helpers sont **autonomes** (`#!/usr/bin/python3 -I`, aucun import de l'app). Ils valident tout : noms de paquets, versions, fichiers **appartenant à l'utilisateur appelant** (`PKEXEC_UID`), `sign-file` appartenant à root avec ses dossiers parents non modifiables, vmlinuz dans `/boot`. Ils refusent de supprimer le kernel en cours d'exécution.
-- **Après une modification de `helpers/*`, il faut les réinstaller** (`./install.sh` ou `sudo install -m 0755 helpers/* /usr/libexec/kernelcustom-manager/`). L'app utilise toujours la copie installée.
+- **Après une modification de `helpers/*`, il faut les réinstaller** (reconstruire et réinstaller le paquet, ou `sudo install -m 0755 helpers/* /usr/libexec/kernelcustom-manager/` pour un test rapide). L'app utilise toujours la copie installée.
 - Ajouter une opération root = une nouvelle action validée dans le helper + une méthode dans `PkexecHelper`. Documenter dans `docs/POLICYKIT_README.md`.
 - `modinfo` **ne nécessite pas root** et lit directement les `.ko.xz`/`.ko.zst` : pas de helper pour vérifier une signature.
 - Le `kmod` de Debian est compilé sans zlib : les modules `.ko.gz` ne sont pas lisibles par `modinfo` (Debian utilise xz/zstd).
@@ -70,7 +70,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - Jamais listés : profils, historiques, journal en cours.
 - Inventaire en ligne de commande (lecture seule) : `python3 -m core.cleanup_manager [--keys]`.
 
-## Disposition du paquet .deb
+## Paquet .deb (étape 8)
 
 ```
 /usr/bin/kernelcustom-manager                          → lanceur (script Python minimal)
@@ -79,15 +79,21 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 /usr/libexec/kernelcustom-manager/kernelcustom-nvidia-installer  → installeur NVIDIA (pkexec, auth_admin)
 /usr/share/polkit-1/actions/com.kernelcustom.manager.policy
 /usr/share/applications/com.kernelcustom.manager.desktop
-/usr/share/icons/hicolor/scalable/apps/com.kernelcustom.manager.svg
+/usr/share/icons/hicolor/256x256/apps/com.kernelcustom.manager.png
+/usr/share/man/man1/kernelcustom-manager.1.gz
 /usr/share/doc/kernelcustom-manager/
 ```
 
-- Nom du paquet : `kernelcustom-manager`. Architecture `all`. Construction avec `dh $@ --with python3`.
-- La policy polkit pointe déjà vers `/usr/libexec/kernelcustom-manager/` (fait à l'étape 3).
-- `Depends` : python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, policykit-1 (ou polkitd + pkexec), build-essential, bc, bison, flex, libssl-dev, libelf-dev, libncurses-dev, fakeroot, dpkg-dev, debhelper, rsync, kmod, curl, xz-utils, dkms
-- `Recommends` : mokutil, sbsigntool, shim-signed, firmware-amd-graphics
-- Aucun fichier écrit dans le `$HOME` à l'installation. Les données utilisateur sont créées au lancement.
+- Paquet `kernelcustom-manager`, architecture `all`, format `3.0 (native)`. `dh $@ --with python3`, avec `dh_python3 /usr/lib/kernelcustom-manager` (dossier privé, précompilé à l'installation).
+- Fichiers du dépôt propres au paquet : `bin/kernelcustom-manager` (lanceur : ajoute `/usr/lib/kernelcustom-manager` à `sys.path` et appelle `main()`), `data/com.kernelcustom.manager.desktop`, `data/kernelcustom-manager.1`.
+- **Ne jamais lancer `dh_python3` sur `/usr/libexec`** : il réécrit le shebang des helpers root et **supprime `-I`**.
+- `kernelcustom_manager.py` est exécutable dans le dépôt, mais remis en 0644 dans le paquet (`override_dh_fixperms`), car il est importé par le lanceur.
+- `Depends` : outils de compilation du kernel (`build-essential`, `bc`, `bison`, `flex`, `libssl-dev`, `libelf-dev`, `libdw-dev`, `libncurses-dev`, `fakeroot`, `dpkg-dev`, `rsync`, `cpio`, `kmod`, `pahole` car Debian active `CONFIG_DEBUG_INFO_BTF`, `xz-utils`), plus `debhelper`, `openssl`, `pciutils`, `pkexec`, `polkitd`, `ptyxis | x-terminal-emulator`, GTK4 et libadwaita. **`debhelper` est vraiment nécessaire** : le `debian/rules` généré par `make bindeb-pkg` appelle `dh_*` (override lintian `binary-package-depends-on-toolchain-package`).
+- `Recommends` : dkms, mokutil, sbsigntool, shim-signed. `Suggests` : firmware-amd-graphics (non-free-firmware).
+- `prerm` (remove) : annule une installation NVIDIA programmée (`kernelcustom-nvidia-installer cancel`), sinon le service appellerait au démarrage un helper supprimé. `postrm` (purge) : supprime `/var/lib/kernelcustom-manager`. **Les données utilisateur (`~/.local/share/kernelcustom-manager`) ne sont jamais touchées.**
+- Aucun fichier écrit dans le `$HOME` à l'installation.
+- Construction : `dpkg-buildpackage -us -uc -b` depuis `KernelCustomManager/`. Les `.deb`, `.buildinfo` et `.changes` sont écrits dans `/usr/src/BOOKWORM/`, et ignorés par le `.gitignore` racine.
+- Un ancien `~/.local/share/applications/com.kernelcustom.manager.desktop`, créé par `install.sh`, est prioritaire sur celui du paquet et lance la version du dépôt. Il faut le supprimer.
 
 ## Interface GTK4 (étape 7)
 
@@ -104,7 +110,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - Widgets communs : `gui/widgets.py`. On y trouve `SimpleList` (tableau `Gtk.ColumnView` : `set_rows`, `append`, `selected()` → `Row` avec `row[i]` et `row.data`), `section` (bloc titré en carte), `page_box`, `title_label`, `markup_label`, `button`, `button_row`, `labeled`, `entry`, `monospace_view`, `inner_tabs` (`Gtk.Stack` + `StackSwitcher`), `info_bar`, `clear_box` et `run_once_when_mapped`.
 - **Chargement différé** : ce qui demande le mot de passe ou est lent se lance à la première ouverture de l'onglet (`run_once_when_mapped`). C'est le cas du diagnostic SecureBoot (une seule lecture `mokutil-diagnose`, réutilisée par la liste des clés, échec compris) et du scan de nettoyage. La version stable de kernel.org est lue en arrière-plan.
 - Les onglets complexes sont des classes (`DriversPage`, `SecureBootPage`, `CleanupPage`) accessibles depuis la fenêtre (`main_window.drivers_page`…).
-- Notifications : `KernelManager.notifier` est branché par la fenêtre sur `app.notify()` (`Gio.Notification`). `core/` reste sans GTK. Il faut le `.desktop` `com.kernelcustom.manager.desktop` pour que GNOME les affiche.
+- Notifications : `KernelManager.notifier` est branché par la fenêtre sur `app.notify()` (`Gio.Notification`). `core/` reste sans GTK. GNOME n'affiche les `Gio.Notification` que si le `.desktop` `com.kernelcustom.manager.desktop` est installé. Sinon (lancement depuis le dépôt sans le paquet), `app.notify()` passe par `org.freedesktop.Notifications`.
 - La signature SecureBoot à la compilation est réactivée. La case est cochée par défaut si SecureBoot est actif et qu'une clé MOK existe (`find_signing_key`).
 - **Tester sans afficher de fenêtre sur la session de l'utilisateur** : `DISPLAY=:0` est la vraie session GNOME. Utiliser broadway, par exemple `gtk4-broadwayd :7 &`, puis `env -u DISPLAY GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 KCM_DATA_DIR=/tmp/x python3 kernelcustom_manager.py`. Pour une capture : `win.snapshot_child(win.get_first_child(), snapshot)` puis `get_renderer().render_texture(...)`, avec `gtk-enable-animations=False`, sinon les dialogues restent invisibles car l'animation n'avance pas sans client broadway.
 
@@ -120,8 +126,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 
 - `core/driver_manager.py` et `core/secureboot_manager.py` renvoient encore des messages en dur (français ou anglais) affichés tels quels. Ils devraient renvoyer des clés i18n.
 - `docs/ARCHITECTURE.md` décrit encore GTK3, Ubuntu et AMD. À réécrire à l'étape Release.
-- `install.sh` installe `debhelper-compat` (paquet virtuel). À revoir avec `debian/control` à l'étape 8.
-- `data/icons/hicolor/scalable/…svg` n'est qu'un PNG encapsulé (3 Mo). Prévoir un vrai SVG, ou n'installer que le PNG 256×256 dans le paquet.
+- `data/icons/hicolor/scalable/…svg` n'est qu'un PNG encapsulé (3 Mo) : le paquet n'installe que le PNG 256×256. Prévoir un vrai SVG.
 - Corrigé à l'étape 7 :
   - le `pkexec` lancé au démarrage par l'onglet SecureBoot ;
   - `show_question()` qui renvoyait un booléen (supprimé) ;
@@ -134,8 +139,9 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 ```bash
 python3 kernelcustom_manager.py              # lancer depuis le dépôt
 python3 -m py_compile $(git ls-files '*.py') # vérification de syntaxe rapide
-dpkg-buildpackage -us -uc -b                 # construire le .deb (étape 6+)
-lintian ../kernelcustom-manager_*.deb        # vérifier le paquet
+dpkg-buildpackage -us -uc -b                 # construire le .deb (dans /usr/src/BOOKWORM/)
+lintian -I --pedantic ../kernelcustom-manager_*.changes  # vérifier le paquet
+sudo apt install ../kernelcustom-manager_*_all.deb       # installer
 ```
 
 ## Notes Debian 14

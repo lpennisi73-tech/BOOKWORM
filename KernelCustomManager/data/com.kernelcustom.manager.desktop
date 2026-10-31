@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=KernelCustom Manager
+GenericName=Custom Kernel Manager
+GenericName[fr]=Gestionnaire de kernels
+Comment=Build, sign and install custom Linux kernels
+Comment[fr]=Compiler, signer et installer des kernels Linux personnalisés
+Exec=kernelcustom-manager
+Icon=com.kernelcustom.manager
+Terminal=false
+Categories=System;
+Keywords=kernel;linux;compile;secureboot;mok;nvidia;
+StartupNotify=true

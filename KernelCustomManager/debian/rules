@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+APP := /usr/lib/kernelcustom-manager
+
+%:
+	dh $@ --with python3
+
+override_dh_install:
+	dh_install -X__pycache__ -X.pyc
+
+override_dh_python3:
+	dh_python3 $(APP)
+	# Pas de dh_python3 sur /usr/libexec : il réécrirait le shebang des helpers root
+	# et supprimerait « -I » (mode isolé)
+
+override_dh_fixperms:
+	dh_fixperms
+	# Exécutable dans le dépôt (lancement direct), importé par /usr/bin/kernelcustom-manager une fois installé
+	chmod 0644 debian/kernelcustom-manager$(APP)/kernelcustom_manager.py

@@ -1,0 +1,60 @@
+Source: kernelcustom-manager
+Section: admin
+Priority: optional
+Maintainer: Kenny-Tech <lpennisi73@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               dh-python,
+               python3:any,
+Standards-Version: 4.7.4
+Homepage: https://github.com/lpennisi73-tech/BOOKWORM
+Vcs-Browser: https://github.com/lpennisi73-tech/BOOKWORM
+Vcs-Git: https://github.com/lpennisi73-tech/BOOKWORM.git
+Rules-Requires-Root: no
+
+Package: kernelcustom-manager
+Architecture: all
+Depends: ${misc:Depends},
+         ${python3:Depends},
+         gir1.2-adw-1,
+         gir1.2-gtk-4.0,
+         python3-gi,
+         pkexec,
+         polkitd,
+         ptyxis | x-terminal-emulator,
+         bc,
+         bison,
+         build-essential,
+         cpio,
+         debhelper,
+         dpkg-dev,
+         fakeroot,
+         flex,
+         kmod,
+         libdw-dev,
+         libelf-dev,
+         libncurses-dev,
+         libssl-dev,
+         openssl,
+         pahole,
+         pciutils,
+         rsync,
+         xz-utils,
+Recommends: dkms,
+            mokutil,
+            sbsigntool,
+            shim-signed,
+Suggests: firmware-amd-graphics,
+Description: build, sign and install custom Linux kernels
+ KernelCustom Manager is a GTK4/libadwaita application for Debian that
+ makes custom kernels easy:
+  - download kernel sources from kernel.org and configure them;
+  - compile them into Debian packages (make bindeb-pkg) and install them;
+  - manage the sources in /usr/src (links for DKMS);
+  - install GPU drivers (Debian repositories, or the official NVIDIA
+    installer);
+  - SecureBoot: create and enroll a MOK key, sign the modules and the
+    kernel image;
+  - clean up the working directory.
+ .
+ Privileged operations go through a helper with a whitelist of actions,
+ authorized by PolicyKit.

@@ -1,0 +1,11 @@
+kernelcustom_manager.py usr/lib/kernelcustom-manager
+core usr/lib/kernelcustom-manager
+gui usr/lib/kernelcustom-manager
+utils usr/lib/kernelcustom-manager
+translations usr/lib/kernelcustom-manager
+helpers/kernelcustom-helper usr/libexec/kernelcustom-manager
+helpers/kernelcustom-nvidia-installer usr/libexec/kernelcustom-manager
+bin/kernelcustom-manager usr/bin
+com.kernelcustom.manager.policy usr/share/polkit-1/actions
+data/com.kernelcustom.manager.desktop usr/share/applications
+data/icons/hicolor/256x256/apps/com.kernelcustom.manager.png usr/share/icons/hicolor/256x256/apps

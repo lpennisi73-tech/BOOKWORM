@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+# Fichiers créés par l'installeur NVIDIA (copies des .run). Les données des
+# utilisateurs (~/.local/share/kernelcustom-manager) ne sont jamais supprimées.
+if [ "$1" = "purge" ]; then
+    rm -rf /var/lib/kernelcustom-manager
+fi
+
+#DEBHELPER#
+
+exit 0

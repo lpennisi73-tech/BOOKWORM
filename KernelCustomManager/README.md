@@ -62,28 +62,32 @@
 
 ## 📦 Installation
 
-### Prérequis
+KernelCustom Manager est distribué sous forme de **paquet Debian** (Debian 14 « forky »).
+Le paquet installe l'application, les helpers privilégiés, la policy PolicyKit,
+le lanceur du menu et toutes les dépendances (outils de compilation, GTK4, libadwaita…).
+
+### Construire et installer le paquet
 ```bash
-# Debian
-sudo apt update
-sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
-
-# Outils de compilation (pour kernels)
-sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
-
-# Outils SecureBoot (optionnel, pour systèmes UEFI)
-sudo apt install mokutil openssl
-```
-
-### Installation
-```bash
-# Cloner le dépôt
+sudo apt install git debhelper dh-python
 git clone https://github.com/lpennisi73-tech/BOOKWORM.git
-cd KernelCustomManagerENGUI/KernelCustomManager
+cd BOOKWORM/KernelCustomManager
 
-# Lancer l'application
-python3 kernelcustom_manager.py
+dpkg-buildpackage -us -uc -b          # crée ../kernelcustom-manager_<version>_all.deb
+sudo apt install ../kernelcustom-manager_*_all.deb
 ```
+
+L'application est ensuite dans le menu (« KernelCustom Manager ») ou en ligne de commande :
+```bash
+kernelcustom-manager
+```
+
+### Désinstaller
+```bash
+sudo apt remove kernelcustom-manager   # garde vos données
+sudo apt purge kernelcustom-manager    # supprime aussi /var/lib/kernelcustom-manager
+```
+Vos données (sources, paquets compilés, clés MOK) restent dans
+`~/.local/share/kernelcustom-manager/` : supprimez ce dossier à la main si vous n'en avez plus besoin.
 
 ---
 

@@ -1,0 +1,10 @@
+#!/usr/bin/python3
+"""Lanceur de KernelCustom Manager (paquet Debian)"""
+
+import sys
+
+sys.path.insert(0, "/usr/lib/kernelcustom-manager")
+
+from kernelcustom_manager import main  # noqa: E402
+
+sys.exit(main())

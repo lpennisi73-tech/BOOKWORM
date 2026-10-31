@@ -40,14 +40,16 @@ Règles du helper :
 | `cancel` | Annule une installation programmée |
 | `uninstall` | Lance `/usr/bin/nvidia-uninstall --silent` (si présent et appartenant à root) |
 
-## Installation (depuis le dépôt)
+## Installation
+
+Les helpers et la policy sont installés par le **paquet Debian** `kernelcustom-manager` :
 
 ```bash
-./install.sh            # installe dépendances, helpers et policy
-./uninstall-policykit.sh
+dpkg-buildpackage -us -uc -b
+sudo apt install ../kernelcustom-manager_*_all.deb
 ```
 
-Équivalent manuel :
+Pour tester une modification des helpers sans reconstruire le paquet :
 ```bash
 sudo install -d -m 0755 /usr/libexec/kernelcustom-manager
 sudo install -m 0755 helpers/kernelcustom-helper helpers/kernelcustom-nvidia-installer /usr/libexec/kernelcustom-manager/

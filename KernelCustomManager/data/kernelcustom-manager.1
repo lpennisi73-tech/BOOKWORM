@@ -1,0 +1,31 @@
+.TH KERNELCUSTOM-MANAGER 1 "2026-11-01" "kernelcustom-manager 3.0" "User Commands"
+.SH NAME
+kernelcustom-manager \- build, sign and install custom Linux kernels
+.SH SYNOPSIS
+.B kernelcustom-manager
+.SH DESCRIPTION
+.B kernelcustom-manager
+is a GTK4/libadwaita application for Debian that downloads Linux kernel
+sources from kernel.org, configures and compiles them into Debian packages,
+installs and removes kernels, manages
+.I /usr/src
+sources and GPU drivers, and signs kernels and modules for SecureBoot
+with a Machine Owner Key (MOK).
+.PP
+Privileged operations go through
+.I /usr/libexec/kernelcustom\-manager/kernelcustom\-helper
+and are authorized by PolicyKit.
+.SH FILES
+.TP
+.I ~/.local/share/kernelcustom\-manager/
+Working directory: sources, build logs, packages, profiles, MOK keys.
+.TP
+.I ~/.config/kernelcustom\-manager/language.conf
+Interface language.
+.SH ENVIRONMENT
+.TP
+.B KCM_DATA_DIR
+Use another working directory (for testing).
+.SH SEE ALSO
+.BR pkexec (1),
+.BR mokutil (1)

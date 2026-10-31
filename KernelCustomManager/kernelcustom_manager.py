@@ -79,8 +79,8 @@ class KernelCustomApplication(Adw.Application):
         Notification de bureau, utilisable depuis un thread.
 
         GNOME Shell ignore les Gio.Notification d'une application sans fichier
-        com.kernelcustom.manager.desktop (lancement depuis le dépôt, ou install.sh
-        lancé avec sudo) : dans ce cas on passe par org.freedesktop.Notifications.
+        com.kernelcustom.manager.desktop (lancement depuis le dépôt sans le paquet
+        installé) : dans ce cas on passe par org.freedesktop.Notifications.
         """
         def send():
             if not self._has_desktop_file():
