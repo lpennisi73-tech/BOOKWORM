@@ -133,6 +133,11 @@ class KernelManager:
         
         return True
     
+    def profile_exists(self, profile_name):
+        """Un profil de ce nom existe-t-il déjà ?"""
+        return (is_valid_profile_name(profile_name)
+                and (self.profiles_dir / f"{profile_name}.json").exists())
+
     def load_profile(self, profile_name):
         """Charge un profil"""
         config_path = self.profiles_dir / f"{profile_name}.config"

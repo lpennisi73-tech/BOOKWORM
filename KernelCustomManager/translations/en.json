@@ -40,7 +40,8 @@
     "later": "Later",
     "reboot_now": "Reboot Now",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "replace": "Replace"
   },
   "tooltip": {
     "update_stable": "Update to the latest stable version"
@@ -91,7 +92,8 @@
       "create_link": "{description}\n\nCreate this symbolic link in /usr/src/?",
       "copy_sources": "Copy kernel {version} sources to /usr/src/?\n\nThis will take ~1-2 GB of disk space.",
       "delete_sources": "Remove kernel {version} sources from /usr/src/?\n\nThis action is irreversible!",
-      "unlink_sources": "Remove symbolic link for kernel {version} from /usr/src/?\n\nThis will only remove the link, not the sources."
+      "unlink_sources": "Remove symbolic link for kernel {version} from /usr/src/?\n\nThis will only remove the link, not the sources.",
+      "overwrite_profile": "The profile \"{name}\" already exists.\n\nReplace it with the current configuration?"
     },
     "success": {
       "title": "Success",

@@ -40,7 +40,8 @@
     "later": "Plus tard",
     "reboot_now": "Redémarrer maintenant",
     "yes": "Oui",
-    "no": "Non"
+    "no": "Non",
+    "replace": "Remplacer"
   },
   "tooltip": {
     "update_stable": "Mettre à jour vers la dernière version stable"
@@ -91,7 +92,8 @@
       "create_link": "{description}\n\nCréer ce lien symbolique dans /usr/src/ ?",
       "copy_sources": "Copier les sources du kernel {version} dans /usr/src/ ?\n\nCela prendra ~1-2 Go d'espace disque.",
       "delete_sources": "Supprimer les sources du kernel {version} de /usr/src/ ?\n\nCette action est irréversible !",
-      "unlink_sources": "Supprimer le lien symbolique pour le kernel {version} de /usr/src/ ?\n\nCela ne supprimera que le lien, pas les sources."
+      "unlink_sources": "Supprimer le lien symbolique pour le kernel {version} de /usr/src/ ?\n\nCela ne supprimera que le lien, pas les sources.",
+      "overwrite_profile": "Le profil « {name} » existe déjà.\n\nLe remplacer par la configuration actuelle ?"
     },
     "success": {
       "title": "Succès",

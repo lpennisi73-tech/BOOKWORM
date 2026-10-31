@@ -76,7 +76,16 @@ def save_profile_dialog(main_window, profiles):
         elif not is_valid_profile_name(name):
             main_window.dialogs.show_error(i18n._("message.error.title"),
                                            i18n._("message.error.invalid_profile_name", name=name))
-        elif main_window.kernel_manager.save_profile(name, desc):
+        elif main_window.kernel_manager.profile_exists(name):
+            main_window.dialogs.ask(i18n._("message.confirm.title"),
+                                    i18n._("message.confirm.overwrite_profile", name=name),
+                                    on_yes=lambda: do_save(name, desc), destructive=True,
+                                    yes_label=i18n._("button.replace"))
+        else:
+            do_save(name, desc)
+
+    def do_save(name, desc):
+        if main_window.kernel_manager.save_profile(name, desc):
             main_window.dialogs.toast(i18n._("message.success.profile_saved", name=name))
             refresh_profiles(main_window, profiles)
         else:
