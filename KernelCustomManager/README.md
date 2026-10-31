@@ -76,6 +76,14 @@ dpkg-buildpackage -us -uc -b          # crée ../kernelcustom-manager_<version>_
 sudo apt install ../kernelcustom-manager_*_all.deb
 ```
 
+### Mettre à jour
+Après un `git pull` (ou une modification du code), reconstruire puis réinstaller le paquet :
+```bash
+cd BOOKWORM/KernelCustomManager
+rm -f ../kernelcustom-manager_*      # anciens paquets : un seul .deb doit correspondre au motif
+dpkg-buildpackage -us -uc -b && sudo apt install ../kernelcustom-manager_*_all.deb
+```
+
 L'application est ensuite dans le menu (« KernelCustom Manager ») ou en ligne de commande :
 ```bash
 kernelcustom-manager
