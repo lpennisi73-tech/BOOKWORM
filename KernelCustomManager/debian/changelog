@@ -18,7 +18,7 @@ kernelcustom-manager (3.0) unstable; urgency=medium
     - validation du nom des profils et confirmation avant remplacement.
   * Licence : GPL-2 (la fenêtre « À propos » et le README indiquaient GPL-3).
 
- -- Kenny-Tech <lpennisi73@gmail.com>  Sun, 01 Nov 2026 00:22:28 +0100
+ -- Kenny-Tech <contact@bookworm-mon0.org>  Sun, 01 Nov 2026 00:22:28 +0100
 
 kernelcustom-manager (3.0~dev1) unstable; urgency=medium
 
@@ -29,4 +29,4 @@ kernelcustom-manager (3.0~dev1) unstable; urgency=medium
   * Interface GTK4 + libadwaita, helpers root en Python avec liste blanche,
     dossier de travail XDG (~/.local/share/kernelcustom-manager).
 
- -- Kenny-Tech <lpennisi73@gmail.com>  Sun, 01 Nov 2026 00:10:00 +0100
+ -- Kenny-Tech <contact@bookworm-mon0.org>  Sun, 01 Nov 2026 00:10:00 +0100

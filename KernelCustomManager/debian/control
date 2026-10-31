@@ -1,7 +1,7 @@
 Source: kernelcustom-manager
 Section: admin
 Priority: optional
-Maintainer: Kenny-Tech <lpennisi73@gmail.com>
+Maintainer: Kenny-Tech <contact@bookworm-mon0.org>
 Build-Depends: debhelper-compat (= 13),
                dh-python,
                python3:any,

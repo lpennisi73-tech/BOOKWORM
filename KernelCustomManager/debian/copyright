@@ -1,10 +1,10 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: kernelcustom-manager
-Upstream-Contact: Kenny-Tech <lpennisi73@gmail.com>
+Upstream-Contact: Kenny-Tech <contact@bookworm-mon0.org>
 Source: https://github.com/lpennisi73-tech/BOOKWORM
 
 Files: *
-Copyright: 2025-2026 Kenny-Tech <lpennisi73@gmail.com>
+Copyright: 2025-2026 Kenny-Tech <contact@bookworm-mon0.org>
 License: GPL-2
 
 License: GPL-2
