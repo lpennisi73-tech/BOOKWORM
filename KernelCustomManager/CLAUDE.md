@@ -25,7 +25,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - [x] **2. Retrait d'Ubuntu** : `core/driver_manager.py`, `core/secureboot_manager.py`, `gui/build_tab_*.py`, `install.sh`, `scripts/secureboot/fix_mok_not_appearing.sh` (`EFI/debian`), doc et traductions
 - [x] **3. Helper root en Python** : `kernelcustom-helper` réécrit en Python avec une **liste blanche d'actions** et la validation des chemins (uniquement dans `/usr/src`, le dossier de travail de l'utilisateur, `/boot`…). Supprimer `pkexec bash -c` (`gui/secureboot_tab.py`) et `shell=True` (`core/secureboot_manager.py`). Tous les `pkexec apt/dpkg/cp/systemctl` dispersés passent par le helper
 - [x] **4. Portage du bash restant** : `manage_kernel_sources.sh` → `core/sources_manager.py` + actions `sources-*` du helper. `scripts/secureboot/*.sh` supprimés (doublons de l'app ; seul le contrôle shim/mmx64.efi était nouveau → intégré au diagnostic via `mokutil-diagnose`). Script de compilation `bash -c` → `core/build_runner.py` lancé via `utils/terminal.py`
-- [ ] **5. Chemins centralisés** : nouveau module `utils/paths.py` (dossier de l'app, traductions, icônes, helper, dossier de travail XDG + migration). Plus de `Path(__file__).parent.parent` ni de `/usr/local/bin` codé en dur ailleurs. L'app doit fonctionner **installée ET lancée depuis le dépôt git**
+- [x] **5. Chemins centralisés** : `utils/paths.py` (code, traductions, icônes, runner, helpers, données XDG, configuration) + migration automatique de `~/KernelCustomManager/build`
 - [ ] **6. Outil de nettoyage du dossier de travail** : `core/cleanup_manager.py` + une interface (onglet ou dialogue). Il liste avec leur taille les sources extraites, les arbres compilés, les archives `.tar.xz` téléchargées, les `.deb` générés, les logs et les fichiers pilotes. On peut les supprimer en sélection ou par catégorie, avec confirmation. **Il ne touche jamais** aux sources liées dans `/usr/src` ni au kernel en cours d'exécution (`uname -r`). Les clés MOK sont exclues par défaut
 - [ ] **7. Portage GTK4 + libadwaita** : onglet par onglet (voir la section dédiée). L'interface de l'outil de nettoyage est écrite directement en GTK4 si l'étape 6 arrive après le début du portage
 - [ ] **8. Paquet .deb (TOUT À LA FIN)** : création de `debian/`, construction, `lintian`, test d'installation et de désinstallation. Supprimer `install.sh`, `uninstall-policykit.sh` et le dossier en double `KernelCustomManager/` (il ne contient que des `__init__.py` vides)
@@ -44,6 +44,14 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - Ajouter une opération root = une nouvelle action validée dans le helper + une méthode dans `PkexecHelper`. Documenter dans `docs/POLICYKIT_README.md`.
 - `modinfo` **ne nécessite pas root** et lit directement les `.ko.xz`/`.ko.zst` : pas de helper pour vérifier une signature.
 - Le `kmod` de Debian est compilé sans zlib : les modules `.ko.gz` ne sont pas lisibles par `modinfo` (Debian utilise xz/zstd).
+
+## Chemins (étape 5)
+
+- **Tous les chemins viennent de `utils/paths.py`** : `APP_DIR`, `TRANSLATIONS_DIR`, `ICON_PNG`/`ICON_SVG`, `BUILD_RUNNER`, `HELPER_DIR` (fixe : `/usr/libexec/kernelcustom-manager`, référencé par la policy), `data_dir()` et `config_dir()`. Ne pas utiliser `Path.home()` ni `__file__` ailleurs.
+- `data_dir()` = `$KCM_DATA_DIR`, sinon `$XDG_DATA_HOME/kernelcustom-manager`, sinon `~/.local/share/kernelcustom-manager`. `config_dir()` = `~/.config/kernelcustom-manager` (fichier `language.conf`).
+- Journal : `data_dir()/logs/kernelcustom-manager.log`, configuré dans `kernelcustom_manager.py` (`setup_logging`, `force=True`). Les modules utilisent `logging` sans le configurer. Dans `utils/paths.py`, utiliser `log = logging.getLogger(__name__)`, car un `logging.info()` avant la configuration crée une configuration implicite.
+- **Migration** (`paths.migrate_legacy_data()`) : appelée dans `main()` **avant** l'import de `gui.main_window`. Elle déplace l'ancien dossier, réécrit les liens absolus internes (profondeur 2) et laisse un lien de compatibilité si des liens de `/usr/src` pointent vers l'ancien emplacement. Elle ne fait rien si le nouveau dossier est déjà rempli. Un message est affiché une fois.
+- Pour tester sans toucher à ses données : `KCM_DATA_DIR=/tmp/x python3 kernelcustom_manager.py` ou `HOME=/tmp/fakehome …`.
 
 ## Compilation et terminaux (étape 4)
 

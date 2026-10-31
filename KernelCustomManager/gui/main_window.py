@@ -11,6 +11,7 @@ from core.kernel_manager import KernelManager
 from core.secureboot_manager import SecureBootManager
 from utils.dialogs import DialogHelper
 from utils.i18n import get_i18n
+from utils import paths
 
 
 class KernelManagerWindow(Gtk.Window):
@@ -32,14 +33,14 @@ class KernelManagerWindow(Gtk.Window):
         # Icône de la fenêtre et de la barre des tâches
         try:
             # Essayer icon.png d'abord (plus léger et plus compatible)
-            icon_path = Path(__file__).parent.parent / "icon.png"
+            icon_path = paths.ICON_PNG
             if icon_path.exists():
                 self.set_icon_from_file(str(icon_path))
                 # Définir aussi comme icône par défaut pour toutes les fenêtres
                 Gtk.Window.set_default_icon_from_file(str(icon_path))
             else:
                 # Fallback sur icon.svg
-                icon_path = Path(__file__).parent.parent / "icon.svg"
+                icon_path = paths.ICON_SVG
                 if icon_path.exists():
                     self.set_icon_from_file(str(icon_path))
                     Gtk.Window.set_default_icon_from_file(str(icon_path))

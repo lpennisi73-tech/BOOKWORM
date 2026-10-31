@@ -185,7 +185,7 @@ Backups allow you to roll back to your previous driver if something goes wrong.
 1. Go to **"GPU Drivers"** tab
 2. Click **"💾 Create Backup"** button
 3. Backup is saved with timestamp
-4. Find it in: `~/KernelCustomManager/build/drivers_backup/`
+4. Find it in: `~/.local/share/kernelcustom-manager/drivers_backup/`
 
 **Automatic Backup:**
 - Before installing a new driver, the application will prompt:
@@ -332,7 +332,7 @@ Compile custom Linux kernels with your own configuration.
 
 **What's downloaded:**
 - Source code tarball from kernel.org
-- Extracted to: `~/KernelCustomManager/build/linux-X.X.X/`
+- Extracted to: `~/.local/share/kernelcustom-manager/linux-X.X.X/`
 - Size: ~1-2 GB
 
 ---
@@ -422,7 +422,7 @@ Press Enter to close...
 ```
 
 **Compiled packages location:**
-`~/KernelCustomManager/build/packages/`
+`~/.local/share/kernelcustom-manager/packages/`
 
 ---
 
@@ -450,7 +450,7 @@ uname -r
 ### 5. Troubleshooting Compilation
 
 **Compilation fails immediately:**
-- Check disk space: `df -h ~/KernelCustomManager/`
+- Check disk space: `df -h ~/.local/share/kernelcustom-manager/`
 - Need ~20 GB free
 - Install dependencies: `sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev`
 
@@ -539,7 +539,7 @@ Install locally compiled kernel packages or downloaded .deb files.
 **Steps:**
 1. Go to **"Local Packages"** tab
 2. Packages list shows all `.deb` files in:
-   - `~/KernelCustomManager/build/packages/`
+   - `~/.local/share/kernelcustom-manager/packages/`
 3. Select packages to install (Ctrl+Click for multiple)
 4. Click **"📥 Install"**
 5. Optional: Check **"Also install headers"** if available
@@ -576,7 +576,7 @@ Save and reuse kernel configurations across different compilation sessions.
 6. Profile is saved
 
 **Profile storage:**
-`~/KernelCustomManager/build/profiles/gaming.json`
+`~/.local/share/kernelcustom-manager/profiles/gaming.json`
 
 **What's saved:**
 - Complete `.config` file
@@ -740,7 +740,7 @@ Date                 Version   Suffix    Duration  Status
 3. History is cleared
 
 **History storage:**
-`~/KernelCustomManager/build/compilation_history.json`
+`~/.local/share/kernelcustom-manager/compilation_history.json`
 
 ---
 
@@ -760,12 +760,12 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0
 
 **Check permissions:**
 ```bash
-ls -la ~/KernelCustomManager/build/
+ls -la ~/.local/share/kernelcustom-manager/
 ```
 
 Fix if needed:
 ```bash
-chmod -R 755 ~/KernelCustomManager/build/
+chmod -R 755 ~/.local/share/kernelcustom-manager/
 ```
 
 ---
@@ -836,27 +836,27 @@ sudo apt install mesa-vulkan-drivers intel-media-va-driver
 
 **Check available space:**
 ```bash
-df -h ~/KernelCustomManager/
+df -h ~/.local/share/kernelcustom-manager/
 ```
 
 **Free up space:**
 ```bash
 # Remove old compilation logs
-rm ~/KernelCustomManager/build/logs/*.log
+rm ~/.local/share/kernelcustom-manager/logs/*.log
 
 # Remove old kernel sources
-rm -rf ~/KernelCustomManager/build/linux-*
+rm -rf ~/.local/share/kernelcustom-manager/linux-*
 
 # Remove old packages
-rm ~/KernelCustomManager/build/packages/*.deb
+rm ~/.local/share/kernelcustom-manager/packages/*.deb
 ```
 
 #### Compilation Fails
 
 **Check compilation log:**
 ```bash
-ls -lt ~/KernelCustomManager/build/logs/
-cat ~/KernelCustomManager/build/logs/compile_XXXXXXXX.log
+ls -lt ~/.local/share/kernelcustom-manager/logs/
+cat ~/.local/share/kernelcustom-manager/logs/compile_XXXXXXXX.log
 ```
 
 **Common issues:**
@@ -946,7 +946,7 @@ ps aux | grep -E "wayland|Xorg"
 2. **Keep at least 2 kernels** installed
 3. **Test in a VM first** if possible
 4. **Read error messages carefully**
-5. **Check logs** in `~/KernelCustomManager/build/logs/`
+5. **Check logs** in `~/.local/share/kernelcustom-manager/logs/`
 6. **Monitor disk space** regularly
 7. **Update system** before major operations: `sudo apt update && sudo apt upgrade`
 
@@ -971,7 +971,7 @@ sudo apt autoremove
 
 **Manually compile kernel:**
 ```bash
-cd ~/KernelCustomManager/build/linux-6.11.1/
+cd ~/.local/share/kernelcustom-manager/linux-6.11.1/
 make -j$(nproc) bindeb-pkg
 ```
 

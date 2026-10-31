@@ -16,6 +16,7 @@ import shutil
 import os
 import platform
 
+from utils import paths
 from utils.pkexec_helper import PkexecHelper
 
 
@@ -28,7 +29,7 @@ class DriverManager:
 
     def __init__(self, base_dir=None):
         if base_dir is None:
-            self.base_dir = Path.home() / "KernelCustomManager" / "build"
+            self.base_dir = paths.data_dir()
         else:
             self.base_dir = Path(base_dir)
 

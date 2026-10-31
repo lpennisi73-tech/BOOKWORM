@@ -7,6 +7,8 @@ from gi.repository import Notify
 import subprocess
 import shutil
 from pathlib import Path
+
+from utils import paths
 from datetime import datetime
 import json
 
@@ -16,7 +18,7 @@ class KernelManager:
     
     def __init__(self, base_dir=None):
         if base_dir is None:
-            self.base_dir = Path.home() / "KernelCustomManager" / "build"
+            self.base_dir = paths.data_dir()
         else:
             self.base_dir = Path(base_dir)
         

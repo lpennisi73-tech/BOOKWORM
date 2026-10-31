@@ -121,7 +121,7 @@ python3 kernelcustom_manager.py
 ```bash
 # Dans l'onglet "Drivers GPU" :
 # 1. Cliquer sur "💾 Créer sauvegarde"
-# 2. La sauvegarde est enregistrée dans ~/KernelCustomManager/build/drivers_backup/
+# 2. La sauvegarde est enregistrée dans ~/.local/share/kernelcustom-manager/drivers_backup/
 # 3. Consulter l'onglet "⏮️ Rollback" pour voir toutes les sauvegardes
 ```
 
@@ -135,7 +135,7 @@ python3 kernelcustom_manager.py
 # 4. Aller dans l'onglet "✍️ Signature"
 # 5. Générer une nouvelle clé de signature (nom: "kernel-signing")
 # 6. Aller dans l'onglet "🔑 Clés MOK"
-# 7. Importer le certificat généré (~/KernelCustomManager/build/secureboot/keys/kernel-signing.der)
+# 7. Importer le certificat généré (~/.local/share/kernelcustom-manager/secureboot/keys/kernel-signing.der)
 # 8. Redémarrer le système
 # 9. Au boot, dans le MOK Manager : sélectionner "Enroll MOK", entrer le mot de passe, redémarrer
 
@@ -261,7 +261,7 @@ Compilation terminée avec succès ✅
 ```
 
 **🔐 Sécurité :**
-- Clés stockées dans `~/KernelCustomManager/build/secureboot/keys/`
+- Clés stockées dans `~/.local/share/kernelcustom-manager/secureboot/keys/`
 - Support des formats DER, PEM, CER
 - Historique chiffré de toutes les opérations
 - Pas de bypass des protections UEFI natives
@@ -279,16 +279,22 @@ Compilation terminée avec succès ✅
 
 ### Variables d'Environnement
 ```bash
-# Dossier de travail (par défaut : ~/KernelCustomManager/build)
-export KERNELCUSTOM_BUILD_DIR="/chemin/personnalisé"
+# Dossier de travail (par défaut : ~/.local/share/kernelcustom-manager)
+export XDG_DATA_HOME="/chemin/personnalisé"   # → $XDG_DATA_HOME/kernelcustom-manager
+export KCM_DATA_DIR="/chemin/exact"           # chemin exact (prioritaire, utile pour les tests)
+
+# Préférences (langue) : ~/.config/kernelcustom-manager (ou $XDG_CONFIG_HOME)
 
 # Langue (par défaut : système)
 export LANG=fr_FR.UTF-8  # ou en_US.UTF-8
 ```
 
 ### Fichiers de Configuration
+
+> Depuis la v3.0, le dossier `~/KernelCustomManager/build` des versions précédentes est **déplacé automatiquement** au premier lancement. Les liens symboliques internes sont mis à jour. Si des liens de `/usr/src` (DKMS) pointaient vers l'ancien dossier, un lien de compatibilité est conservé à l'ancien emplacement.
+
 ```
-~/KernelCustomManager/build/
+~/.local/share/kernelcustom-manager/
 ├── configs/                  # Configurations kernel sauvegardées
 ├── profiles/                 # Profils utilisateur
 ├── drivers_backup/           # Sauvegardes de drivers
@@ -371,7 +377,7 @@ Utilisation de kernels personnalisés avec SecureBoot activé :
 python3 -c "import gi; gi.require_version('Gtk', '3.0')"
 
 # Vérifier les permissions
-ls -la ~/KernelCustomManager/build/
+ls -la ~/.local/share/kernelcustom-manager/
 ```
 
 ### Le driver NVIDIA ne s'installe pas
@@ -389,13 +395,13 @@ journalctl -u kernelcustom-nvidia-install.service
 ### Erreur de compilation kernel
 ```bash
 # Vérifier l'espace disque
-df -h ~/KernelCustomManager/
+df -h ~/.local/share/kernelcustom-manager/
 
 # Vérifier les dépendances de compilation
 sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
 
 # Consulter le log
-cat ~/KernelCustomManager/build/logs/compile_XXXXXXXX.log
+cat ~/.local/share/kernelcustom-manager/logs/compile_XXXXXXXX.log
 ```
 
 ### Problèmes avec SecureBoot
@@ -413,10 +419,10 @@ modinfo -F sig_id /path/to/module.ko
 sudo apt install --reinstall mokutil openssl
 
 # Consulter l'historique SecureBoot
-cat ~/KernelCustomManager/build/secureboot/secureboot_history.json
+cat ~/.local/share/kernelcustom-manager/secureboot/secureboot_history.json
 
 # Emplacement des clés générées
-ls -la ~/KernelCustomManager/build/secureboot/keys/
+ls -la ~/.local/share/kernelcustom-manager/secureboot/keys/
 
 # Si le kernel personnalisé ne boot pas avec SecureBoot activé
 # 1. Vérifier que les modules sont signés : modinfo -F sig_id /lib/modules/$(uname -r)/kernel/.../*.ko

@@ -5,6 +5,8 @@ Internationalization (i18n) system for KernelCustom Manager
 import json
 import os
 from pathlib import Path
+
+from utils import paths
 import locale
 
 
@@ -12,7 +14,7 @@ class I18n:
     """Translation manager"""
 
     def __init__(self):
-        self.config_file = Path.home() / ".config" / "kernelcustom-manager" / "language.conf"
+        self.config_file = paths.config_dir() / "language.conf"
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         self.current_lang = self._load_saved_language() or self._detect_language()
         self.translations = {}
@@ -40,7 +42,7 @@ class I18n:
 
     def load_translations(self):
         """Load translation files"""
-        translations_dir = Path(__file__).parent.parent / "translations"
+        translations_dir = paths.TRANSLATIONS_DIR
         translations_dir.mkdir(exist_ok=True)
 
         for lang_file in translations_dir.glob("*.json"):

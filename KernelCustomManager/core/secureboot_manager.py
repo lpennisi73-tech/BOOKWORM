@@ -14,20 +14,11 @@ import logging
 import threading
 import platform
 
+from utils import paths
 from utils.pkexec_helper import PkexecHelper
 from utils.i18n import get_i18n
 
-# Configurer le logging
-log_file = Path.home() / "KernelCustomManager" / "build" / "secureboot" / "sign_debug.log"
-log_file.parent.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
-)
+# Le logging est configuré par le point d'entrée (kernelcustom_manager.py)
 
 
 class SecureBootManager:
@@ -35,7 +26,7 @@ class SecureBootManager:
 
     def __init__(self, base_dir=None):
         if base_dir is None:
-            self.base_dir = Path.home() / "KernelCustomManager" / "build"
+            self.base_dir = paths.data_dir()
         else:
             self.base_dir = Path(base_dir)
 

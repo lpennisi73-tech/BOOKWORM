@@ -155,13 +155,13 @@ class KernelManager:
 
 **Design Decisions:**
 - Uses **pathlib.Path** for cross-platform path handling
-- Downloads to **user home directory** (~/.cache or ~/KernelCustomManager) to avoid requiring root
+- Downloads to **user home directory** (~/.local/share/kernelcustom-manager, XDG) to avoid requiring root
 - Compilation happens in **terminal** for real-time user feedback
 - **Threaded downloads** with progress callbacks
 
 **Data Storage:**
 ```
-~/KernelCustomManager/build/
+~/.local/share/kernelcustom-manager/
 ├── linux-6.11.1/              # Extracted source
 ├── packages/                   # Compiled .deb files
 ├── configs/                    # Saved .config files
@@ -400,7 +400,7 @@ def create_driver_backup(self) -> dict
         "notes": ""
     }
 
-    Saved to: ~/KernelCustomManager/build/drivers_backup/{backup_id}.json
+    Saved to: ~/.local/share/kernelcustom-manager/drivers_backup/{backup_id}.json
     """
 ```
 
@@ -431,7 +431,7 @@ def add_to_history(self, action, vendor, driver_name, driver_version,
         "distro": "ubuntu 24.04"
     }
 
-    Appended to: ~/KernelCustomManager/build/drivers_history.json
+    Appended to: ~/.local/share/kernelcustom-manager/drivers_history.json
     """
 ```
 

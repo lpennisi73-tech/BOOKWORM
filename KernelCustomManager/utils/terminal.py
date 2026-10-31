@@ -7,7 +7,8 @@ interpolé) : aucun risque d'injection via un nom de fichier ou un suffixe.
 
 import subprocess
 import sys
-from pathlib import Path
+
+from utils.paths import BUILD_RUNNER
 
 # (commande, séparateur avant la commande à exécuter)
 TERMINALS = [
@@ -18,8 +19,6 @@ TERMINALS = [
     ["xfce4-terminal", "-x"],
     ["xterm", "-e"],
 ]
-
-BUILD_RUNNER = Path(__file__).resolve().parent.parent / "core" / "build_runner.py"
 
 
 def launch_in_terminal(argv):

@@ -12,7 +12,8 @@ ni avec `bash -c` ou `shell=True`.
 import subprocess
 from pathlib import Path
 
-HELPER_DIR = Path("/usr/libexec/kernelcustom-manager")
+from utils.paths import HELPER_DIR
+
 
 # Codes de retour de pkexec
 PKEXEC_DISMISSED = 126   # dialogue d'authentification annulé
