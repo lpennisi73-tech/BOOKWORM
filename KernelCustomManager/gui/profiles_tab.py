@@ -6,6 +6,7 @@ from datetime import datetime
 
 from gi.repository import Gtk
 
+from core.kernel_manager import is_valid_profile_name
 from gui.widgets import SimpleList, button, button_row, entry, page_box, title_label
 from utils.i18n import get_i18n
 
@@ -61,12 +62,20 @@ def save_profile_dialog(main_window, profiles):
                           (i18n._("dialog.save_profile.description"), desc_entry)):
         form.append(Gtk.Label(label=label, xalign=0))
         form.append(widget)
+        if widget is name_entry:
+            hint = Gtk.Label(label=i18n._("dialog.save_profile.name_hint"), xalign=0, wrap=True)
+            hint.add_css_class("dim-label")
+            hint.add_css_class("caption")
+            form.append(hint)
 
     def on_save():
         name = name_entry.get_text().strip()
         desc = desc_entry.get_text().strip()
         if not name:
             main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.enter_name"))
+        elif not is_valid_profile_name(name):
+            main_window.dialogs.show_error(i18n._("message.error.title"),
+                                           i18n._("message.error.invalid_profile_name", name=name))
         elif main_window.kernel_manager.save_profile(name, desc):
             main_window.dialogs.toast(i18n._("message.success.profile_saved", name=name))
             refresh_profiles(main_window, profiles)

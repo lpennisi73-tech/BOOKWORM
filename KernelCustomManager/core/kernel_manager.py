@@ -4,6 +4,7 @@ Logique métier pour télécharger, compiler, installer les kernels
 """
 
 import logging
+import re
 import subprocess
 import shutil
 from pathlib import Path
@@ -11,6 +12,16 @@ from pathlib import Path
 from utils import paths
 from datetime import datetime
 import json
+
+
+# Nom de profil : lettres (accents compris), chiffres, espace, point, tiret, plus et
+# souligné, 64 caractères au plus. Il doit commencer par une lettre ou un chiffre :
+# pas de « / », de « .. » ni de fichier caché, le profil reste dans profiles/
+PROFILE_NAME_RE = re.compile(r'^[^\W_][\w .+-]{0,63}$')
+
+
+def is_valid_profile_name(name):
+    return bool(PROFILE_NAME_RE.match(name)) and not name.endswith(" ")
 
 
 class KernelManager:
@@ -97,10 +108,13 @@ class KernelManager:
         return backup_path
     
     def save_profile(self, profile_name, description=""):
-        """Sauvegarde un profil"""
+        """Sauvegarde un profil (False si le nom est invalide ou s'il n'y a pas de .config)"""
+        if not is_valid_profile_name(profile_name):
+            return False
+
         linux_dir = self.base_dir / "linux"
         config_file = linux_dir / ".config"
-        
+
         if not config_file.exists():
             return False
         

@@ -77,7 +77,8 @@
       "select_version": "Please select a version",
       "invalid_version": "Invalid version",
       "invalid_suffix": "Invalid suffix: use only letters, digits and the characters . _ + ~ - (e.g. -kernelcustom)",
-      "make_missing": "make not found: install build-essential (sudo apt install build-essential)."
+      "make_missing": "make not found: install build-essential (sudo apt install build-essential).",
+      "invalid_profile_name": "The name \"{name}\" contains characters that are not allowed.\n\nAllowed characters: letters, digits, space, dot, hyphen (-), plus (+) and underscore (_). The name must start with a letter or a digit (64 characters at most)."
     },
     "confirm": {
       "title": "Confirm",
@@ -176,7 +177,8 @@
       "name_placeholder": "e.g.: gaming, server, desktop",
       "description": "Description:",
       "description_placeholder": "Optional",
-      "button_save": "💾 Save"
+      "button_save": "💾 Save",
+      "name_hint": "Letters, digits, space, . - + _ (e.g. gaming-7.3.1)"
     },
     "suffix_dkms": {
       "title": "DKMS Suffix",
