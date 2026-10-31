@@ -5,6 +5,7 @@ Point d'entrée principal
 """
 
 import logging
+import os
 import sys
 
 import gi
@@ -74,8 +75,17 @@ class KernelCustomApplication(Adw.Application):
         self.window.present()
 
     def notify(self, title, message, urgency="normal"):
-        """Notification de bureau (Gio.Notification), utilisable depuis un thread"""
+        """
+        Notification de bureau, utilisable depuis un thread.
+
+        GNOME Shell ignore les Gio.Notification d'une application sans fichier
+        com.kernelcustom.manager.desktop (lancement depuis le dépôt, ou install.sh
+        lancé avec sudo) : dans ce cas on passe par org.freedesktop.Notifications.
+        """
         def send():
+            if not self._has_desktop_file():
+                self._notify_freedesktop(title, message, urgency)
+                return False
             notification = Gio.Notification.new(title)
             notification.set_body(message)
             notification.set_priority({
@@ -85,6 +95,31 @@ class KernelCustomApplication(Adw.Application):
             self.send_notification(None, notification)
             return False
         GLib.idle_add(send)
+
+    @staticmethod
+    def _has_desktop_file():
+        """Le .desktop de l'application est-il installé (dossiers XDG) ?"""
+        name = f"{paths.APPLICATION_ID}.desktop"
+        dirs = [GLib.get_user_data_dir()] + list(GLib.get_system_data_dirs())
+        return any(os.path.isfile(os.path.join(d, "applications", name)) for d in dirs)
+
+    def _notify_freedesktop(self, title, message, urgency):
+        """Notification via org.freedesktop.Notifications (ne demande pas de .desktop)"""
+        hints = {"urgency": GLib.Variant("y", {"low": 0, "critical": 2}.get(urgency, 1))}
+        params = GLib.Variant("(susssasa{sv}i)", (
+            "KernelCustom Manager", 0, paths.APPLICATION_ID,
+            title, message, [], hints, -1))
+
+        def on_done(bus, result):
+            try:
+                bus.call_finish(result)
+            except GLib.Error as e:
+                logging.warning("Notification impossible : %s", e.message)
+
+        Gio.bus_get_sync(Gio.BusType.SESSION, None).call(
+            "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications", "Notify", params,
+            GLib.VariantType("(u)"), Gio.DBusCallFlags.NONE, -1, None, on_done)
 
 
 def main():

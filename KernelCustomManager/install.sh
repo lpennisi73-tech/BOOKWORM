@@ -22,6 +22,13 @@ if [ "$ID" != "debian" ]; then
     exit 1
 fi
 
+# Le lanceur (.desktop) est installé dans le $HOME de l'utilisateur : avec sudo,
+# il atterrirait dans /root et GNOME n'afficherait pas les notifications de l'app
+if [ "$EUID" -eq 0 ]; then
+    echo "❌ Lancez ce script sans sudo (./install.sh) : il demandera le mot de passe quand nécessaire"
+    exit 1
+fi
+
 echo "📦 Distribution: $PRETTY_NAME"
 echo ""
 
