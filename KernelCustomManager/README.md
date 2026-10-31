@@ -1,33 +1,46 @@
-# 🚀 KernelCustom Manager - SecureBoot Edition v2.3
+# 🚀 KernelCustom Manager v3.0
 
-[![Version](https://img.shields.io/badge/version-2.3-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
-[![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-3.0-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
+[![Debian](https://img.shields.io/badge/Debian-14%20forky-a80030.svg)](https://www.debian.org/)
+[![Python](https://img.shields.io/badge/python-3-green.svg)](https://www.python.org/)
 [![GTK](https://img.shields.io/badge/GTK-4%20%2B%20libadwaita-orange.svg)](https://www.gtk.org/)
-[![License](https://img.shields.io/badge/license-GPL--3.0-red.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--2.0-red.svg)](../LICENSE)
 [![Language](https://img.shields.io/badge/language-FR%20%7C%20EN-yellow.svg)](translations/)
 
-**KernelCustom Manager** est un gestionnaire complet de kernels Linux et de drivers GPU pour **Debian 13/14**, offrant une interface graphique intuitive pour :
-- 🔧 Compiler et gérer des kernels personnalisés
+**KernelCustom Manager** est un gestionnaire complet de kernels Linux et de drivers GPU pour **Debian 14 « forky »**, avec une interface **GTK4 + libadwaita**, pour :
+- 🔧 Compiler des kernels personnalisés et les installer en paquets `.deb`
+- 🔒 Les faire démarrer avec SecureBoot (clé MOK, signature des modules et de vmlinuz)
 - 🎮 Installer et gérer des drivers GPU (NVIDIA, AMD, Intel)
-- 🔒 Gérer SecureBoot et signer les modules kernel
+- 📂 Gérer les sources de `/usr/src` (pour DKMS)
 - 💾 Créer des profils de configuration
-- 📜 Suivre l'historique des installations
-- ⏮️ Effectuer des rollbacks en cas de problème
+- 📜 Suivre l'historique des compilations et des installations
+- 🧹 Nettoyer le dossier de travail
+- ⏮️ Effectuer des rollbacks de drivers en cas de problème
 
 ---
 
 ## ✨ Fonctionnalités Principales
 
-### 🔩 **Gestion des Kernels**
-- Téléchargement automatique des sources kernel depuis kernel.org
-- Configuration via menuconfig avec templates
-- Compilation multi-threadée optimisée
-- Gestion des kernels installés (liste, suppression)
-- Installation de paquets .deb locaux
-- Système de profils pour sauvegarder/restaurer configurations
+L'interface est organisée en 9 onglets : **Kernels installés**, **Paquets locaux**, **Compiler**, **Pilotes GPU**, **SecureBoot**, **Sources système**, **Profils**, **Historique** et **Nettoyage**.
 
-### 🎮 **Gestion des Drivers GPU (v2.2)** 🆕
-- **Support multi-fabricants** : NVIDIA, AMD, Intel
+### 🔩 **Gestion des Kernels**
+- Téléchargement des sources depuis kernel.org (dernière version stable proposée)
+- Configuration à partir de la config du système ou d'un fichier, puis `make nconfig` (optionnel)
+- Compilation multi-threadée dans un terminal, en paquets `.deb` (`make bindeb-pkg`), avec notification de fin
+- Gestion des kernels installés (liste, suppression ; le kernel en cours d'exécution est protégé)
+- Installation des paquets `.deb` compilés
+- Profils pour sauvegarder et restaurer des configurations
+
+### 📂 **Sources système**
+- Installation ou liens des sources et headers dans `/usr/src` (pour DKMS)
+- Suppression sécurisée (jamais de vrais headers Debian)
+
+### 🧹 **Nettoyage** 🆕
+- Inventaire de l'espace occupé : objets de compilation, archives, journaux, téléchargements, sources, paquets…
+- Les sources et headers du kernel en cours d'exécution, et ceux utilisés par `/usr/src`, sont protégés
+
+### 🎮 **Gestion des Drivers GPU**
+- **Support multi-fabricants** : NVIDIA, AMD, Intel (AMD et Intel : pilotes libres Mesa + firmware des dépôts Debian)
 - **Détection automatique** : GPU, distribution, serveur d'affichage (X11/Wayland)
 - **Installation intelligente** :
   - Depuis les dépôts Debian (recommandé)
@@ -37,21 +50,26 @@
 - **Historique complet** : Traçabilité de toutes les opérations
 - **Interface à 3 onglets** : Installation, Historique, Rollback
 
-### 🔒 **Gestion SecureBoot (v2.3)** 🆕
+### 🔒 **Gestion SecureBoot**
+- **Assistant** : diagnostic complet (UEFI, SecureBoot, clé MOK, signatures des modules, de l'initrd et de vmlinuz) et bouton pour corriger
 - **Détection automatique** : Statut UEFI et SecureBoot
 - **Gestion des clés MOK** :
   - Lister les clés enrollées
   - Importer/Supprimer des clés
   - Réinitialisation complète
-- **Signature de modules** :
-  - Génération de clés de signature RSA-2048
+- **Signature** :
+  - Génération d'une clé MOK RSA-2048
+  - Signature des modules et de l'image vmlinuz d'un kernel installé
   - Signature manuelle de modules .ko
   - Vérification des signatures existantes
 - **Automatisation intelligente** :
-  - Option de signature pendant la compilation
-  - Signature automatique après compilation réussie
+  - Signature des modules pendant la compilation (cochée par défaut si SecureBoot est actif et qu'une clé MOK existe)
   - Génération de clés à la demande
-- **Interface à 4 onglets** : Statut, Clés MOK, Signature, Historique
+- **Interface à 5 onglets** : Assistant, Statut, Clés MOK, Signature, Historique
+
+### 🛡️ **Sécurité**
+- Aucun `sudo` ni `bash -c` : les opérations root passent par un **helper avec liste blanche d'actions**, autorisé par PolicyKit (voir [POLICYKIT_README](docs/POLICYKIT_README.md))
+- Toutes les commandes sont lancées avec des listes d'arguments, jamais via un shell
 
 ### 🌍 **Multilingue**
 - Français 🇫🇷
@@ -104,11 +122,11 @@ Vos données (sources, paquets compilés, clés MOK) restent dans
 ### 1. **Installer un Driver GPU**
 
 ```bash
-# Lancer KernelCustom Manager
-python3 kernelcustom_manager.py
+# Lancer KernelCustom Manager (menu ou commande)
+kernelcustom-manager
 
 # Dans l'interface :
-# 1. Aller dans l'onglet "Drivers GPU"
+# 1. Aller dans l'onglet "Pilotes GPU"
 # 2. Cliquer sur "🔄 Actualiser" pour détecter votre GPU
 # 3. Choisir une méthode d'installation :
 #    - Depuis dépôts (recommandé) : sélectionner un driver et cliquer "Installer"
@@ -120,18 +138,18 @@ python3 kernelcustom_manager.py
 
 ```bash
 # 1. Aller dans l'onglet "Compiler"
-# 2. Entrer une version (ex: 6.11.1)
+# 2. Entrer une version (ex: 7.3.1)
 # 3. Cliquer "📥 Télécharger"
 # 4. Cliquer "⚙️ Configurer" (choisir config système)
-# 5. Cliquer "🔨 Compiler le kernel"
-# 6. Attendre la fin de la compilation
+# 5. Cliquer "🔨 Compiler le kernel" : la compilation s'ouvre dans un terminal
+# 6. Attendre la notification de fin de compilation
 # 7. Aller dans "Paquets locaux" et installer
 ```
 
 ### 3. **Créer une Sauvegarde de Driver**
 
 ```bash
-# Dans l'onglet "Drivers GPU" :
+# Dans l'onglet "Pilotes GPU" :
 # 1. Cliquer sur "💾 Créer sauvegarde"
 # 2. La sauvegarde est enregistrée dans ~/.local/share/kernelcustom-manager/drivers_backup/
 # 3. Consulter l'onglet "⏮️ Rollback" pour voir toutes les sauvegardes
@@ -141,23 +159,19 @@ python3 kernelcustom_manager.py
 
 ```bash
 # Première utilisation - Configuration initiale
-# 1. Aller dans l'onglet "SecureBoot"
-# 2. Vérifier le statut UEFI et SecureBoot
-# 3. Installer les dépendances si nécessaire (bouton "Installer les dépendances")
-# 4. Aller dans l'onglet "✍️ Signature"
-# 5. Générer une nouvelle clé de signature (nom: "kernel-signing")
-# 6. Aller dans l'onglet "🔑 Clés MOK"
-# 7. Importer le certificat généré (~/.local/share/kernelcustom-manager/secureboot/keys/kernel-signing.der)
-# 8. Redémarrer le système
-# 9. Au boot, dans le MOK Manager : sélectionner "Enroll MOK", entrer le mot de passe, redémarrer
+# 1. Aller dans l'onglet "SecureBoot" → "🚀 Assistant"
+# 2. Lire le diagnostic : si la clé MOK manque, cliquer "Démarrer l'Enrollment"
+#    (la clé est créée dans ~/.local/share/kernelcustom-manager/secureboot/keys/MOK.der)
+# 3. Redémarrer le système
+# 4. Au boot, dans le MOK Manager : sélectionner "Enroll MOK", entrer le mot de passe, redémarrer
 
-# Compiler un kernel avec signature automatique
-# 1. Aller dans l'onglet "Compiler"
-# 2. Télécharger et configurer un kernel normalement
-# 3. Cliquer "🔨 Compiler le kernel"
-# 4. ✅ Cocher "🔒 Signer pour SecureBoot" dans le dialogue
-# 5. Après compilation réussie, les modules seront automatiquement signés
-# 6. Installer le kernel compilé depuis "Paquets locaux"
+# Compiler un kernel signé
+# 1. Aller dans l'onglet "Compiler", télécharger et configurer un kernel
+# 2. Cliquer "🔨 Compiler le kernel" : "Signer pour SecureBoot" est coché par défaut
+# 3. Installer le kernel compilé depuis "Paquets locaux"
+# 4. AVANT de redémarrer : "SecureBoot" → "🚀 Assistant", actualiser le diagnostic,
+#    puis "Re-signer les Modules" en cochant "Signer aussi les images vmlinuz"
+#    (sans vmlinuz signé, shim refuse de démarrer le kernel)
 ```
 
 ---
@@ -167,7 +181,8 @@ python3 kernelcustom_manager.py
 - **[Guide Utilisateur](docs/USER_GUIDE.md)** - Instructions détaillées d'utilisation
 - **[Guide Contributeur](docs/CONTRIBUTING.md)** - Comment contribuer au projet
 - **[Architecture](docs/ARCHITECTURE.md)** - Structure du code et design
-- **[Changelog](CHANGELOG.md)** - Historique des versions
+- **[PolicyKit et helpers](docs/POLICYKIT_README.md)** - Opérations privilégiées
+- **[Changelog Debian](debian/changelog)** - Historique des versions du paquet
 
 ---
 
@@ -175,33 +190,36 @@ python3 kernelcustom_manager.py
 
 ```
 KernelCustomManager/
-├── kernelcustom_manager.py         # Point d'entrée principal
-├── core/                           # Logique métier
-│   ├── kernel_manager.py           # Gestion des kernels
-│   ├── driver_manager.py           # Gestion des drivers GPU (v2.2)
-│   └── secureboot_manager.py       # Gestion SecureBoot (v2.3)
-├── gui/                            # Interface graphique GTK4 + libadwaita
-│   ├── main_window.py              # Fenêtre principale
-│   ├── kernels_tab.py              # Onglet kernels installés
-│   ├── packages_tab.py             # Onglet paquets locaux
-│   ├── build_tab.py                # Onglet compilation
-│   ├── drivers_tab.py              # Onglet drivers GPU (v2.2)
-│   ├── secureboot_tab.py           # Onglet SecureBoot (v2.3)
-│   ├── profiles_tab.py             # Onglet profils
-│   ├── history_tab.py              # Onglet historique
-│   └── sources_tab.py              # Onglet sources système
-├── utils/                          # Utilitaires
-│   ├── dialogs.py                  # Dialogues helper
+├── kernelcustom_manager.py         # Point d'entrée (Adw.Application)
+├── bin/kernelcustom-manager        # Lanceur installé dans /usr/bin
+├── core/                           # Logique métier (sans GTK)
+│   ├── kernel_manager.py           # Kernels, profils, historique
+│   ├── build_runner.py             # Compilation dans le terminal (script autonome)
+│   ├── sources_manager.py          # Sources de /usr/src
+│   ├── driver_manager.py           # Drivers GPU
+│   ├── secureboot_manager.py       # SecureBoot, clés MOK, signatures
+│   └── cleanup_manager.py          # Nettoyage du dossier de travail
+├── gui/                            # Interface GTK4 + libadwaita
+│   ├── main_window.py              # Fenêtre principale (table des 9 onglets)
+│   ├── widgets.py                  # Widgets communs (listes, sections…)
+│   └── *_tab.py                    # Un module par onglet
+├── utils/                          # Utilitaires transverses
+│   ├── paths.py                    # Tous les chemins (programme, données XDG)
+│   ├── dialogs.py                  # Dialogues asynchrones, run_task (threads)
 │   ├── i18n.py                     # Internationalisation
-│   └── pkexec_helper.py            # Opérations privilégiées
-└── translations/                   # Traductions
-    ├── fr.json                     # Français
-    └── en.json                     # Anglais
+│   ├── pkexec_helper.py            # Seul point d'appel de pkexec
+│   └── terminal.py                 # Ouverture d'un terminal
+├── helpers/                        # Programmes root (pkexec), installés dans /usr/libexec
+├── translations/                   # fr.json, en.json
+├── data/                           # .desktop, icône, page de manuel
+└── debian/                         # Paquet Debian
 ```
+
+Détails techniques : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## 🎯 Fonctionnalités Avancées (v2.2)
+## 🎯 Fonctionnalités Avancées
 
 ### 🤖 Installation NVIDIA Intelligente
 KernelCustom Manager détecte automatiquement votre environnement graphique (X11/Wayland) et choisit la meilleure méthode d'installation :
@@ -239,7 +257,7 @@ Toutes les opérations sont enregistrées :
 }
 ```
 
-### 🔒 SecureBoot Intelligent (v2.3)
+### 🔒 SecureBoot Intelligent
 
 #### Qu'est-ce que SecureBoot ?
 SecureBoot est une fonctionnalité de sécurité UEFI qui empêche le chargement de code non signé au démarrage. Cela pose problème pour les kernels personnalisés, car leurs modules ne sont pas signés par défaut.
@@ -248,34 +266,33 @@ SecureBoot est une fonctionnalité de sécurité UEFI qui empêche le chargement
 KernelCustom Manager simplifie grandement ce processus complexe :
 
 **🎯 Workflow automatisé :**
-1. **Détection automatique** : Vérifie si SecureBoot est activé sur votre système
-2. **Proposition intelligente** : Lors de la compilation, propose automatiquement la signature
-3. **Génération de clés** : Crée des clés de signature RSA-2048 si nécessaire
-4. **Signature automatique** : Signe tous les modules kernel après compilation
-5. **Import guidé** : Guide l'utilisateur pour enrolle les clés dans le MOK Manager
+1. **Diagnostic** : l'assistant vérifie UEFI, SecureBoot, la clé MOK et les signatures des kernels personnalisés
+2. **Génération de clé** : crée la clé MOK RSA-2048 si nécessaire
+3. **Enrôlement guidé** : import de la clé, puis validation dans le MOK Manager au redémarrage
+4. **Signature à la compilation** : les modules sont signés avant la création des paquets
+5. **Signature après installation** : modules et vmlinuz du kernel installé, en une opération
 
 **📊 Exemple de workflow complet :**
 ```bash
 # 1. Vérification initiale
 SecureBoot détecté comme activé ✅
-→ Option "Signer pour SecureBoot" apparaît automatiquement
+→ Assistant : "Clé MOK non enrôlée" → Démarrer l'Enrollment
+→ Clé générée : MOK.priv + MOK.der
+→ Redémarrer → MOK Manager → Enroll MOK → mot de passe → Redémarrer
 
-# 2. Première compilation avec SecureBoot
-Compilation terminée avec succès ✅
-→ Dialogue : "Aucune clé trouvée, générer maintenant ?"
-→ Clé générée : kernel-signing.priv + kernel-signing.der
-→ Signature automatique de 2847 modules ✅
+# 2. Compilation
+"Signer pour SecureBoot" coché par défaut ✅
+→ Modules signés avant make bindeb-pkg
 
-# 3. Import dans MOK Manager
-→ Guide : Redémarrer → MOK Manager → Enroll MOK
-→ Entrer mot de passe → Redémarrer
-→ SecureBoot + Kernel personnalisé fonctionnels ✅
+# 3. Installation puis signature de vmlinuz
+→ Assistant : "vmlinuz non signé" → Re-signer (avec vmlinuz)
+→ Diagnostic tout vert : SecureBoot + Kernel personnalisé fonctionnels ✅
 ```
 
 **🔐 Sécurité :**
 - Clés stockées dans `~/.local/share/kernelcustom-manager/secureboot/keys/`
 - Support des formats DER, PEM, CER
-- Historique chiffré de toutes les opérations
+- Historique de toutes les opérations
 - Pas de bypass des protections UEFI natives
 
 **⚡ Fonctionnalités avancées :**
@@ -310,7 +327,12 @@ export LANG=fr_FR.UTF-8  # ou en_US.UTF-8
 ├── configs/                  # Configurations kernel sauvegardées
 ├── profiles/                 # Profils utilisateur
 ├── drivers_backup/           # Sauvegardes de drivers
-├── secureboot/               # Dossier SecureBoot (v2.3)
+├── sources/                  # Sources des kernels téléchargés
+├── linux -> sources/linux-X.Y.Z   # Arbre de compilation actif
+├── kernels_repo/             # Paquets .deb compilés
+├── logs/                     # Journaux de compilation et de l'application
+├── archive/                  # Archives téléchargées
+├── secureboot/               # Dossier SecureBoot
 │   ├── keys/                 # Clés de signature générées
 │   ├── backups/              # Sauvegardes de clés
 │   └── secureboot_history.json  # Historique des opérations SecureBoot
@@ -333,7 +355,7 @@ Nous cherchons des testeurs avec :
 - **GPU NVIDIA** : RTX 4000/3000, GTX 1000 series
 - **GPU AMD** : Radeon RX 7000/6000, Vega
 - **GPU Intel** : Iris Xe, Arc A-series
-- **Distributions** : Debian 13 (Trixie), Debian 14 (Forky)
+- **Distribution** : Debian 14 (Forky)
 
 ---
 
@@ -385,11 +407,14 @@ Utilisation de kernels personnalisés avec SecureBoot activé :
 
 ### L'application ne se lance pas
 ```bash
-# Vérifier les dépendances
-python3 -c "import gi; gi.require_version('Gtk', '3.0')"
+# Lancer depuis un terminal pour voir les erreurs
+kernelcustom-manager
 
-# Vérifier les permissions
-ls -la ~/.local/share/kernelcustom-manager/
+# Vérifier les dépendances
+python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')"
+
+# Consulter le journal de l'application
+less ~/.local/share/kernelcustom-manager/logs/kernelcustom-manager.log
 ```
 
 ### Le driver NVIDIA ne s'installe pas
@@ -409,11 +434,11 @@ journalctl -u kernelcustom-nvidia-install.service
 # Vérifier l'espace disque
 df -h ~/.local/share/kernelcustom-manager/
 
-# Vérifier les dépendances de compilation
-sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
+# Les dépendances de compilation sont installées avec le paquet ; pour les réinstaller :
+sudo apt install --reinstall kernelcustom-manager
 
 # Consulter le log
-cat ~/.local/share/kernelcustom-manager/logs/compile_XXXXXXXX.log
+less ~/.local/share/kernelcustom-manager/logs/compile-AAAAMMJJ-HHMMSS.log
 ```
 
 ### Problèmes avec SecureBoot
@@ -437,16 +462,18 @@ cat ~/.local/share/kernelcustom-manager/secureboot/secureboot_history.json
 ls -la ~/.local/share/kernelcustom-manager/secureboot/keys/
 
 # Si le kernel personnalisé ne boot pas avec SecureBoot activé
-# 1. Vérifier que les modules sont signés : modinfo -F sig_id /lib/modules/$(uname -r)/kernel/.../*.ko
-# 2. Vérifier que la clé MOK est bien enrollée : mokutil --list-enrolled
-# 3. Vérifier les logs du kernel : dmesg | grep -i "signature"
+# (démarrer sur le kernel Debian depuis "Options avancées" dans GRUB)
+# 1. Vérifier que vmlinuz est signé : sbverify --list /boot/vmlinuz-VERSION
+# 2. Vérifier que les modules sont signés : /usr/sbin/modinfo -F signer /lib/modules/VERSION/kernel/fs/mbcache.ko
+# 3. Vérifier que la clé MOK est bien enrôlée : mokutil --list-enrolled
+# 4. Vérifier les logs du kernel : journalctl -k -b -1 | grep -i signature
 ```
 
 ---
 
 ## 📝 License
 
-Ce projet est sous licence **GPL-3.0**. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
+Ce projet est sous licence **GPL-2.0**. Voir le fichier [LICENSE](../LICENSE) pour plus de détails.
 
 ---
 
@@ -455,7 +482,7 @@ Ce projet est sous licence **GPL-3.0**. Voir le fichier [LICENSE](LICENSE) pour 
 - **Dépôt Git** : https://github.com/lpennisi73-tech/BOOKWORM.git
 - **Issues** : Contactez le mainteneur
 - **Documentation** : [docs/](docs/)
-- **Changelog** : [CHANGELOG.md](CHANGELOG.md)
+- **Changelog** : [debian/changelog](debian/changelog)
 
 ---
 
@@ -466,6 +493,7 @@ Ce projet est sous licence **GPL-3.0**. Voir le fichier [LICENSE](LICENSE) pour 
 Avec l'aide de **Claude AI** (Anthropic) pour :
 - Module de gestion des drivers GPU v2.2
 - Module de gestion SecureBoot v2.3
+- Portage v3.0 : GTK4 + libadwaita, helpers en Python, paquet Debian
 
 ---
 
@@ -479,6 +507,17 @@ Avec l'aide de **Claude AI** (Anthropic) pour :
 ---
 
 ## 📅 Historique des Versions
+
+### v3.0 (2026-11-01) - GTK4 + paquet Debian 📦
+- 🎨 **Interface GTK4 + libadwaita** : fenêtre adaptative, dialogues asynchrones, notifications de bureau
+- 📦 **Paquet Debian** `kernelcustom-manager` (remplace `install.sh`), vérifié par lintian
+- 🛡️ **Sécurité** : helpers root en Python avec liste blanche d'actions, plus aucun `sudo`, `bash -c` ni `shell=True`
+- 🐍 **Tout en Python** : compilation, sources `/usr/src` et SecureBoot (fin des scripts bash)
+- 🧹 **Nouvel onglet Nettoyage**
+- 🔒 **SecureBoot** : assistant de diagnostic, signature de vmlinuz, signature à la compilation réactivée
+- 📁 **Dossier de travail XDG** `~/.local/share/kernelcustom-manager` (migration automatique de `~/KernelCustomManager/build`)
+- 🎯 **Debian 14 uniquement** : support d'Ubuntu et des autres distributions retiré, AMD via les dépôts Debian
+- 🐛 Corrections : compilation qui ne se lançait pas avec la signature, notifications invisibles, modules signés vus comme non signés, validation du nom des profils
 
 ### v2.3 (2025-12-05) - SecureBoot Edition 🔒
 - ✨ **Module SecureBoot complet** (1200+ lignes de code)

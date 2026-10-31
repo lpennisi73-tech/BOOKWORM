@@ -65,52 +65,62 @@ Help improve documentation by:
 ## Development Setup
 
 ### Prerequisites
+Debian 14 (Forky).
 ```bash
-# Debian
-sudo apt update
-sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
-
-# Development tools
-sudo apt install git python3-pip
-
-# Optional: for kernel compilation testing
-sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
+sudo apt install git debhelper dh-python lintian
 ```
 
-### Clone and Run
+### Clone, Build and Install
+The privileged helpers and the PolicyKit policy only work once installed in
+`/usr/libexec/kernelcustom-manager/`, so install the package first:
 ```bash
-# Clone the repository
 git clone https://github.com/lpennisi73-tech/BOOKWORM.git
-cd BOOKWORM
+cd BOOKWORM/KernelCustomManager
 
-# Run the application
+dpkg-buildpackage -us -uc -b && sudo apt install ../kernelcustom-manager_*_all.deb
+lintian -I --pedantic ../kernelcustom-manager_*.changes
+```
+
+### Run From the Repository
+After that, you can run your working copy directly. It uses the helpers **installed by the package**:
+```bash
 python3 kernelcustom_manager.py
+
+# Test without touching your real data
+KCM_DATA_DIR=/tmp/kcm-test python3 kernelcustom_manager.py
+```
+
+> ⚠️ After changing `helpers/*`, rebuild and reinstall the package (or, for a quick test,
+> `sudo install -m 0755 helpers/* /usr/libexec/kernelcustom-manager/`).
+
+Quick syntax check:
+```bash
+python3 -m py_compile $(git ls-files '*.py')
 ```
 
 ### Project Structure
 ```
 KernelCustomManager/
-├── kernelcustom_manager.py         # Entry point
-├── core/                           # Business logic
-│   ├── kernel_manager.py           # Kernel operations
-│   └── driver_manager.py           # GPU driver operations
-├── gui/                            # GTK4 + libadwaita interface
-│   ├── main_window.py              # Main window
-│   ├── kernels_tab.py              # Kernels tab
-│   ├── packages_tab.py             # Packages tab
-│   ├── build_tab.py                # Build tab
-│   ├── drivers_tab.py              # Drivers tab (v2.2)
-│   ├── profiles_tab.py             # Profiles tab
-│   ├── history_tab.py              # History tab
-│   └── sources_tab.py              # Sources tab
-├── utils/                          # Utilities
-│   ├── dialogs.py                  # Dialog helpers
-│   ├── i18n.py                     # Internationalization
-│   └── pkexec_helper.py            # Privileged operations
-└── translations/                   # Translation files
-    ├── fr.json                     # French
-    └── en.json                     # English
+├── kernelcustom_manager.py         # Entry point (Adw.Application)
+├── bin/kernelcustom-manager        # Launcher installed in /usr/bin
+├── core/                           # Business logic (no GTK)
+├── gui/                            # GTK4 + libadwaita interface (one module per tab)
+├── utils/                          # paths, dialogs, i18n, pkexec_helper, terminal
+├── helpers/                        # Root programs run through pkexec (standalone)
+├── translations/                   # fr.json, en.json
+├── data/                           # .desktop file, icon, man page
+└── debian/                         # Debian packaging
 ```
+See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
+
+### Project Rules
+- **Debian 14 only**: do not add code for other distributions
+- **Logic in `core/`** (no GTK), interface in `gui/`, shared utilities in `utils/`
+- **All paths come from `utils/paths.py`** (no `Path.home()` or `__file__` elsewhere)
+- **Root operations only through `PkexecHelper`** and a whitelisted helper action: no `sudo`, `pkexec` elsewhere, `bash -c` or `shell=True`
+- Commands are always run with **argument lists**
+- **Every user-visible text goes through `utils/i18n.py`**, with the key in both `fr.json` and `en.json`
+- Code and comments are written in French
 
 ---
 
@@ -123,7 +133,7 @@ We follow PEP 8 with some modifications:
 - **Indentation**: 4 spaces (no tabs)
 - **Line length**: 100 characters maximum (flexible for readability)
 - **Encoding**: UTF-8
-- **Python version**: 3.8+ compatible
+- **Python version**: the one in Debian 14 (3.14)
 
 #### Naming Conventions
 ```python
@@ -152,12 +162,13 @@ from pathlib import Path
 
 # Third-party libraries
 import gi
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Adw, Gtk, GLib
 
 # Local modules
 from core.kernel_manager import KernelManager
-from utils.i18n import I18n
+from utils.i18n import get_i18n
 ```
 
 #### Documentation
@@ -306,7 +317,7 @@ When testing, please provide:
 # Fork the repository on the Git server
 # Then clone your fork
 git clone https://github.com/lpennisi73-tech/BOOKWORM
-cd KernelCustomManager
+cd BOOKWORM/KernelCustomManager
 
 # Create a feature branch
 git checkout -b feature/your-feature-name
@@ -325,17 +336,17 @@ git checkout -b fix/your-bug-fix
 # Stage your changes
 git add .
 
-# Commit with a descriptive message
-git commit -m "Add support for nouveau driver detection
+# Commit with a descriptive message (in French, with a prefix)
+git commit -m "Feat: Détection du pilote nouveau
 
-- Added nouveau driver detection in driver_manager.py
-- Updated GUI to display nouveau version
-- Added French/English translations
-- Tested on Debian 14 with GTX 1060"
+- Détection de nouveau dans driver_manager.py
+- Version affichée dans l'onglet Pilotes GPU
+- Traductions fr/en
+- Testé sous Debian 14 avec une GTX 1060"
 ```
 
 **Commit Message Guidelines:**
-- Use present tense ("Add feature" not "Added feature")
+- Written in French, prefixed with `Fix:`, `Feat:`, `Refactor:`, `Release:` or `Docs:`
 - First line: short summary (50 chars max)
 - Blank line, then detailed description if needed
 - Reference issues: "Fixes #123" or "Related to #456"
@@ -415,12 +426,12 @@ What actually happens
 - Kernel: [uname -r output]
 - GPU: [Model]
 - Display Server: [X11/Wayland]
-- KernelCustom Manager version: [e.g., v2.2]
+- KernelCustom Manager version: [e.g., 3.0: `dpkg -s kernelcustom-manager | grep Version`]
 
 **Logs:**
 ```
 [Paste relevant logs here]
-- Application logs: Check terminal output
+- Application log: ~/.local/share/kernelcustom-manager/logs/kernelcustom-manager.log
 - NVIDIA logs: /var/log/nvidia-installer.log
 - System logs: journalctl -xe
 ```
@@ -487,8 +498,7 @@ cp translations/en.json translations/YOUR_LANGUAGE.json
 ```json
 {
   "window": {
-    "title": "KernelCustom Manager",
-    "subtitle": "Professional Edition v2.2"
+    "title": "KernelCustom Manager"
   },
   "button": {
     "refresh": "🔄 Actualizar",
@@ -497,14 +507,12 @@ cp translations/en.json translations/YOUR_LANGUAGE.json
 }
 ```
 
-3. **Update i18n.py** to support the new language:
+3. **Add the language to the main menu** (`LANGUAGES` in `gui/main_window.py`).
+   Translation files are loaded automatically from `translations/`:
 ```python
-SUPPORTED_LANGUAGES = {
-    'en': 'English',
-    'fr': 'Français',
-    'es': 'Español'  # Add your language
-}
+LANGUAGES = [("en", "English"), ("fr", "Français"), ("es", "Español")]
 ```
+   To detect it from the system locale, also update `_detect_language()` in `utils/i18n.py`.
 
 4. **Test thoroughly** to ensure:
    - All UI elements are translated
@@ -554,4 +562,4 @@ Your contributions make KernelCustom Manager better for everyone. Whether you're
 
 ## License
 
-By contributing to KernelCustom Manager, you agree that your contributions will be licensed under the GPL-3.0 license.
+By contributing to KernelCustom Manager, you agree that your contributions will be licensed under the GPL-2.0 license.

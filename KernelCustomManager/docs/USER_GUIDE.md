@@ -1,6 +1,6 @@
 # KernelCustom Manager - User Guide
 
-Complete guide for using KernelCustom Manager Professional Edition v2.2
+Complete guide for using KernelCustom Manager v3.0
 
 ## Table of Contents
 - [Getting Started](#getting-started)
@@ -10,6 +10,8 @@ Complete guide for using KernelCustom Manager Professional Edition v2.2
 - [Local Packages](#local-packages)
 - [Configuration Profiles](#configuration-profiles)
 - [System Sources](#system-sources)
+- [SecureBoot](#secureboot)
+- [Cleanup](#cleanup)
 - [History](#history)
 - [Troubleshooting](#troubleshooting)
 
@@ -19,11 +21,11 @@ Complete guide for using KernelCustom Manager Professional Edition v2.2
 
 ### First Launch
 
-1. **Launch the application**:
+1. **Launch the application** from the applications menu (**KernelCustom Manager**) or from a terminal:
 ```bash
-cd KernelCustomManagerENGUI/KernelCustomManager
-python3 kernelcustom_manager.py
+kernelcustom-manager
 ```
+   The application is installed by the `kernelcustom-manager` Debian package (see the [README](../README.md#-installation)).
 
 2. **Language Selection**:
    - The application detects your system language automatically
@@ -31,15 +33,15 @@ python3 kernelcustom_manager.py
    - Change language via the menu if needed
 
 3. **Main Interface**:
-   - The application uses a tabbed interface
-   - Each tab represents a different feature
+   - Nine tabs: Installed Kernels, Local Packages, Compile, GPU Drivers, SecureBoot, System Sources, Profiles, History and Cleanup
+   - On a narrow window, the tab bar moves to the bottom
+   - The main menu (☰) changes the language and shows the About dialog
    - Privileged operations will prompt for your password via PolicyKit
 
 ### System Requirements
 
-- Debian 13 (Trixie) or Debian 14 (Forky)
-- Python 3.11 or newer
-- GTK 4 + libadwaita 1.6 or newer
+- Debian 14 (Forky)
+- All other dependencies (Python, GTK 4, libadwaita, kernel build tools) are installed with the package
 - At least 20 GB free disk space (for kernel compilation)
 - Internet connection (for downloading kernels/drivers)
 
@@ -231,8 +233,8 @@ If a new driver causes problems, you can restore a previous backup.
 2. You'll see a list of all backups:
    ```
    Backup ID              Driver             Distribution
-   backup_20251028_143000 nvidia-driver      debian 13
-   backup_20251027_091500 nvidia-driver      debian 13
+   backup_20251028_143000 nvidia-driver      debian forky/sid
+   backup_20251027_091500 nvidia-driver      debian forky/sid
    ```
 3. Select the backup you want to restore
 4. Click **"⏮️ Restore Backup"**
@@ -394,12 +396,17 @@ Suffix (optional): [-custom]
   → Builds .deb packages without root privileges
   → Always recommended unless you have specific reasons
 
+☑ Sign for SecureBoot
+  → Signs the modules with your MOK key before packaging
+  → Checked by default when SecureBoot is enabled and a MOK key exists
+  → See the SecureBoot section: vmlinuz must also be signed after installation
+
 Estimated time: 30-90 minutes
 ```
 
 4. Click **"🔨 Compile"**
 5. Terminal window opens showing compilation progress
-6. Wait for compilation to complete (grab a coffee!)
+6. Wait for compilation to complete (grab a coffee!): a desktop notification tells you when it is done
 
 **Compilation output:**
 ```
@@ -422,7 +429,7 @@ Press Enter to close...
 ```
 
 **Compiled packages location:**
-`~/.local/share/kernelcustom-manager/packages/`
+`~/.local/share/kernelcustom-manager/kernels_repo/`
 
 ---
 
@@ -436,7 +443,8 @@ Press Enter to close...
 3. Click **"📥 Install"**
 4. Choose whether to install headers
 5. Wait for installation
-6. Reboot to use the new kernel
+6. If SecureBoot is enabled, **sign vmlinuz before rebooting** (see [SecureBoot](#secureboot))
+7. Reboot to use the new kernel
 
 **Verifying installation:**
 ```bash
@@ -452,7 +460,7 @@ uname -r
 **Compilation fails immediately:**
 - Check disk space: `df -h ~/.local/share/kernelcustom-manager/`
 - Need ~20 GB free
-- Install dependencies: `sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev`
+- Build dependencies come with the package; reinstall them if needed: `sudo apt install --reinstall kernelcustom-manager`
 
 **Compilation fails midway:**
 - Check compilation log in terminal
@@ -498,9 +506,8 @@ Manage installed kernels on your system.
    ```
    The following packages will be removed:
 
-   • linux-image-6.10.5-generic
-   • linux-headers-6.10.5-generic
-   • linux-modules-6.10.5-generic
+   • linux-image-7.2.1-custom
+   • linux-headers-7.2.1-custom
 
    This action is irreversible!
    ```
@@ -539,7 +546,7 @@ Install locally compiled kernel packages or downloaded .deb files.
 **Steps:**
 1. Go to **"Local Packages"** tab
 2. Packages list shows all `.deb` files in:
-   - `~/.local/share/kernelcustom-manager/packages/`
+   - `~/.local/share/kernelcustom-manager/kernels_repo/`
 3. Select packages to install (Ctrl+Click for multiple)
 4. Click **"📥 Install"**
 5. Optional: Check **"Also install headers"** if available
@@ -705,6 +712,68 @@ DKMS looks for kernel sources in `/usr/src/linux-headers-X.X.X/`
 
 ---
 
+## SecureBoot
+
+### Overview
+With SecureBoot enabled, the firmware (through shim) only boots a kernel image signed with a trusted key, and the kernel only loads signed modules. Debian kernels are signed by Debian; **your custom kernels must be signed with your own Machine Owner Key (MOK)**.
+
+The **SecureBoot** tab has five sub-tabs: **🚀 Wizard**, **Status**, **MOK Keys**, **Signing** and **History**.
+
+### 1. The Wizard (start here)
+The wizard runs a full diagnosis the first time you open the tab (it asks for your password once to read the MOK list):
+- UEFI and SecureBoot state
+- MOK key: created and enrolled?
+- For each custom kernel: modules, initrd and vmlinuz signatures
+
+Each problem comes with a solution, and the first one has an action button.
+
+### 2. Creating and Enrolling Your MOK Key (once)
+1. In the wizard, click **"Start Enrollment"** when the MOK key is missing
+2. The key is created in `~/.local/share/kernelcustom-manager/secureboot/keys/` (`MOK.priv`, `MOK.der`, `MOK.pem`)
+3. Choose a one-time password
+4. Reboot: the blue **MOK Manager** screen appears
+5. Select **Enroll MOK** → **Continue** → **Yes**, type the password, then **Reboot**
+
+### 3. Signing a Custom Kernel
+1. Compile with **"Sign for SecureBoot"** checked (default when a MOK key exists): the modules are signed before packaging
+2. Install the packages from **Local Packages**
+3. **Before rebooting**, open **SecureBoot → 🚀 Wizard** and refresh the diagnosis
+4. If it reports an unsigned vmlinuz, click **"Re-sign Modules"**, select the kernel and keep **"Also sign vmlinuz images"** checked
+5. Refresh the diagnosis: everything should be green. You can now reboot into your kernel
+
+> ⚠️ Without a signed vmlinuz, shim refuses to boot the kernel. Choose the Debian kernel in GRUB's **Advanced options** to recover, then sign it.
+
+**Check by hand:**
+```bash
+sbverify --list /boot/vmlinuz-VERSION                       # vmlinuz signature
+/usr/sbin/modinfo -F signer /lib/modules/VERSION/kernel/fs/mbcache.ko   # module signer
+mokutil --list-enrolled                                     # enrolled keys
+```
+
+---
+
+## Cleanup
+
+### Overview
+Kernel builds use a lot of disk space. The **Cleanup** tab lists what can be removed from the working directory, by category, with its size:
+- Build objects (`make clean`: keeps `.config` and what DKMS needs)
+- Downloaded archives, logs, driver downloads (selected by default)
+- Kernel sources, headers, compiled packages, driver and configuration backups (not selected by default)
+
+### Protected Items
+These are never removed:
+- The sources and headers of the **running kernel**
+- Sources used by links in `/usr/src` or `/lib/modules/*/build` (DKMS)
+
+Profiles, histories and the current log are never listed. SecureBoot keys are only listed if you turn on **"Also show SecureBoot keys"**.
+
+### Steps
+1. Open the **Cleanup** tab (the scan starts automatically; **Scan** runs it again)
+2. Check or uncheck items: the selected size is shown at the bottom
+3. Click **"Clean selection"** and confirm
+
+---
+
 ## History
 
 ### Overview
@@ -748,14 +817,19 @@ Date                 Version   Suffix    Duration  Status
 
 ### Application Won't Start
 
-**Check GTK dependencies:**
+**Run it from a terminal to see errors:**
 ```bash
-python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')"
+kernelcustom-manager
 ```
 
-If error, install:
+**Check the application log:**
 ```bash
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
+less ~/.local/share/kernelcustom-manager/logs/kernelcustom-manager.log
+```
+
+**Reinstall the package and its dependencies:**
+```bash
+sudo apt install --reinstall kernelcustom-manager
 ```
 
 **Check permissions:**
@@ -781,7 +855,7 @@ lsmod | grep nouveau
 
 If nouveau is loaded, blacklist it:
 ```bash
-sudo bash -c "echo 'blacklist nouveau' > /etc/modprobe.d/blacklist-nouveau.conf"
+echo 'blacklist nouveau' | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
 sudo update-initramfs -u
 sudo reboot
 ```
@@ -841,14 +915,7 @@ df -h ~/.local/share/kernelcustom-manager/
 
 **Free up space:**
 ```bash
-# Remove old compilation logs
-rm ~/.local/share/kernelcustom-manager/logs/*.log
-
-# Remove old kernel sources
-rm -rf ~/.local/share/kernelcustom-manager/linux-*
-
-# Remove old packages
-rm ~/.local/share/kernelcustom-manager/packages/*.deb
+# Use the Cleanup tab: it shows what takes space and protects what is in use
 ```
 
 #### Compilation Fails
@@ -856,18 +923,18 @@ rm ~/.local/share/kernelcustom-manager/packages/*.deb
 **Check compilation log:**
 ```bash
 ls -lt ~/.local/share/kernelcustom-manager/logs/
-cat ~/.local/share/kernelcustom-manager/logs/compile_XXXXXXXX.log
+less ~/.local/share/kernelcustom-manager/logs/compile-YYYYMMDD-HHMMSS.log
 ```
 
 **Common issues:**
 
 1. **Missing dependencies:**
 ```bash
-sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
+sudo apt install --reinstall kernelcustom-manager
 ```
 
 2. **Invalid kernel configuration:**
-- Run `make menuconfig` and ensure config is valid
+- Use **"⚙️ Configure"** with `make nconfig` and ensure config is valid
 - Use system config as base instead of custom config
 
 3. **Corrupted source files:**
@@ -965,28 +1032,26 @@ dpkg -l | grep linux-image
 
 **Remove kernel manually:**
 ```bash
-sudo apt remove linux-image-6.10.5-generic
+sudo apt remove linux-image-7.2.1-custom
 sudo apt autoremove
 ```
 
 **Manually compile kernel:**
 ```bash
-cd ~/.local/share/kernelcustom-manager/linux-6.11.1/
+cd ~/.local/share/kernelcustom-manager/linux/
 make -j$(nproc) bindeb-pkg
 ```
 
 ### Environment Variables
 
-**Change build directory:**
+**Change the working directory** (default: `~/.local/share/kernelcustom-manager`):
 ```bash
-export KERNELCUSTOM_BUILD_DIR="/path/to/custom/dir"
-python3 kernelcustom_manager.py
+KCM_DATA_DIR="/path/to/custom/dir" kernelcustom-manager
 ```
 
-**Force language:**
+**Force language** (or use the main menu, the choice is saved in `~/.config/kernelcustom-manager/language.conf`):
 ```bash
-export LANG=fr_FR.UTF-8
-python3 kernelcustom_manager.py
+LANG=fr_FR.UTF-8 kernelcustom-manager
 ```
 
 ---
@@ -1012,7 +1077,7 @@ A: **Repositories** for most users (stable, easy updates). **Official sites** on
 A: Use the Rollback feature to restore your previous driver. If system won't boot, use TTY (Ctrl+Alt+F3) or boot from live USB.
 
 **Q: Can I use this on other distributions?**
-A: No. KernelCustom Manager targets Debian 13/14 only. Ubuntu and other distributions are not supported.
+A: No. KernelCustom Manager targets Debian 14 (Forky) only. Ubuntu and other distributions are not supported.
 
 **Q: How do I report bugs?**
 A: Contact the maintainer via https://git-srv.bookworm.ddns.net/BOOKWORM or see [CONTRIBUTING.md](CONTRIBUTING.md).

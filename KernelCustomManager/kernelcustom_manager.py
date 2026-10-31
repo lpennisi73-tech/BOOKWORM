@@ -15,7 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from utils import paths
 
-VERSION = "3.0-dev"
+VERSION = "3.0"
 
 
 def setup_logging():

@@ -124,7 +124,7 @@ class KernelManagerWindow(Adw.ApplicationWindow):
             application_icon=paths.APPLICATION_ID,
             version=self.version,
             comments=self.i18n._("about.comments"),
-            license_type=Gtk.License.GPL_3_0,
+            license_type=Gtk.License.GPL_2_0_ONLY,
             developer_name="KernelCustom Manager",
         )
         about.present(self)

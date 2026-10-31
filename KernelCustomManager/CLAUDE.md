@@ -18,6 +18,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 | Paquet | Option A : répertoire `debian/` + debhelper, vérifié par `lintian` |
 | Dossier de travail | Standard XDG `~/.local/share/kernelcustom-manager/` (au lieu de `~/KernelCustomManager/build`), **avec migration automatique** de l'ancien dossier |
 | Interface | **GTK4 + libadwaita** (`Adw.Application`), portage fait à l'étape 7 |
+| Licence | **GPL-2** (fichier `LICENSE` à la racine de BOOKWORM ; « À propos » : `Gtk.License.GPL_2_0_ONLY`) |
 
 ## Plan (un commit par étape)
 
@@ -29,7 +30,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - [x] **6. Outil de nettoyage (logique)** : `core/cleanup_manager.py` (`scan()` / `clean()`, sans GTK) + traductions `cleanup.*`. **L'interface sera écrite en GTK4 à l'étape 7** (onglet ou dialogue « 🧹 Nettoyage »)
 - [x] **7. Portage GTK4 + libadwaita** (branche `gtk4`) : `Adw.Application`, fenêtre `Adw.ApplicationWindow` + `Adw.ViewStack`, dialogues asynchrones, `Gtk.ColumnView`, `Gio.Notification`, nouvel onglet « Nettoyage ». Voir « Interface GTK4 »
 - [x] **8. Paquet .deb** : `debian/` (debhelper 13, `dh-python`), `lintian` propre (y compris `--pedantic` et expérimental), installation, désinstallation et purge testées. `install.sh`, `uninstall-policykit.sh` et le dossier en double `KernelCustomManager/` sont supprimés. Voir « Paquet .deb »
-- [ ] **9. Release v3.0** : mise à jour de la version, du changelog Debian et de la doc
+- [x] **9. Release v3.0** : version `3.0` (`VERSION`, `debian/changelog`), README, USER_GUIDE (sections SecureBoot et Nettoyage), CONTRIBUTING et ARCHITECTURE réécrits. Licence alignée sur **GPL-2** (fichier `LICENSE` de la racine)
 
 > L'app s'installe avec le paquet .deb. Pour développer, on peut toujours la lancer depuis le dépôt (`python3 kernelcustom_manager.py`) : elle utilise alors les helpers et la policy **installés par le paquet**.
 
@@ -125,7 +126,6 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 ## Dette repérée
 
 - `core/driver_manager.py` et `core/secureboot_manager.py` renvoient encore des messages en dur (français ou anglais) affichés tels quels. Ils devraient renvoyer des clés i18n.
-- `docs/ARCHITECTURE.md` décrit encore GTK3, Ubuntu et AMD. À réécrire à l'étape Release.
 - `data/icons/hicolor/scalable/…svg` n'est qu'un PNG encapsulé (3 Mo) : le paquet n'installe que le PNG 256×256. Prévoir un vrai SVG.
 - Corrigé à l'étape 7 :
   - le `pkexec` lancé au démarrage par l'onglet SecureBoot ;

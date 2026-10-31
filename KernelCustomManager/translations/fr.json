@@ -1,7 +1,6 @@
 {
   "window": {
-    "title": "KernelCustom Manager",
-    "subtitle": "Édition Professionnelle v2.3"
+    "title": "KernelCustom Manager"
   },
   "tab": {
     "kernels": "Kernels installés",
