@@ -2,21 +2,30 @@
 Module de compilation du kernel
 """
 
-import gi
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
 import json
+import os
 import re
 import threading
-import os
 import time
 from datetime import datetime
+
+from gi.repository import GLib, Gtk
+
+from gui.widgets import entry, labeled, markup_label
 from utils.i18n import get_i18n
 from utils.terminal import launch_in_terminal, build_runner_command
-from core.secureboot_manager import SecureBootManager
 
 
 LOCALVERSION_RE = re.compile(r'^[A-Za-z0-9._+~-]+$')
+
+
+def find_signing_key(sb_manager):
+    """Clé MOK utilisée pour signer à la compilation : (clé .priv, certificat .der) ou None"""
+    keys = sorted(sb_manager.keys_dir.glob("*.priv"))
+    key_file = next((k for k in keys if k.stem == "MOK"), keys[0] if keys else None)
+    if key_file and key_file.with_suffix('.der').exists():
+        return key_file, key_file.with_suffix('.der')
+    return None
 
 
 def show_compile_dialog(main_window):
@@ -32,85 +41,43 @@ def show_compile_dialog(main_window):
         main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_config"))
         return
 
-    dialog = Gtk.Dialog(
-        title=i18n._("dialog.compile.title"),
-        transient_for=main_window,
-        flags=0
-    )
-    dialog.set_default_size(450, 250)
-    
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(20)
-    content.set_margin_end(20)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
-    
-    # Threads
-    threads_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-    threads_box.pack_start(Gtk.Label(label=i18n._("dialog.compile.threads")), False, False, 0)
+    form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
 
-    threads_spin = Gtk.SpinButton()
-    threads_spin.set_range(1, os.cpu_count() * 2)
-    threads_spin.set_value(os.cpu_count())
-    threads_spin.set_increments(1, 4)
-    threads_box.pack_start(threads_spin, True, True, 0)
+    cpus = os.cpu_count() or 1
+    threads_spin = Gtk.SpinButton.new_with_range(1, cpus * 2, 1)
+    threads_spin.set_value(cpus)
+    form.append(labeled(i18n._("dialog.compile.threads"), threads_spin))
 
-    content.pack_start(threads_box, False, False, 0)
+    suffix_entry = entry(placeholder=i18n._("dialog.compile.suffix_placeholder"))
+    form.append(labeled(i18n._("dialog.compile.suffix"), suffix_entry))
 
-    # Suffixe
-    suffix_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-    suffix_box.pack_start(Gtk.Label(label=i18n._("dialog.compile.suffix")), False, False, 0)
+    fakeroot_check = Gtk.CheckButton(label=i18n._("dialog.compile.use_fakeroot"), active=True)
+    form.append(fakeroot_check)
 
-    suffix_entry = Gtk.Entry()
-    suffix_entry.set_placeholder_text(i18n._("dialog.compile.suffix_placeholder"))
-    suffix_box.pack_start(suffix_entry, True, True, 0)
-
-    content.pack_start(suffix_box, False, False, 0)
-
-    # Fakeroot
-    fakeroot_check = Gtk.CheckButton(label=i18n._("dialog.compile.use_fakeroot"))
-    fakeroot_check.set_active(True)
-    content.pack_start(fakeroot_check, False, False, 0)
-
-    # SecureBoot signing option (Temporairement désactivé dans le GUI - À réactiver dans une prochaine version)
+    # Signature SecureBoot des modules avant la création des paquets
     sb_manager = main_window.secureboot_manager
-    secureboot_check = None
-
-    # if sb_manager.should_prompt_for_signing():
-    #     secureboot_check = Gtk.CheckButton(label=i18n._("dialog.compile.sign_for_secureboot"))
-    #     secureboot_check.set_active(False)
-    #     content.pack_start(secureboot_check, False, False, 0)
-
-    #     sb_info_label = Gtk.Label()
-    #     sb_info_label.set_markup(f"<small><i>{i18n._('dialog.compile.secureboot_info')}</i></small>")
-    #     sb_info_label.set_line_wrap(True)
-    #     content.pack_start(sb_info_label, False, False, 0)
-
-    # Info
-    info_label = Gtk.Label()
-    info_label.set_markup(f"<i>{i18n._('dialog.compile.estimated_time')}</i>")
-    content.pack_start(info_label, False, False, 0)
-
-    dialog.add_button(i18n._("button.cancel"), Gtk.ResponseType.CANCEL)
-    dialog.add_button(i18n._("dialog.compile.button_compile"), Gtk.ResponseType.OK)
-    
-    dialog.show_all()
-    response = dialog.run()
-    
-    if response == Gtk.ResponseType.OK:
-        jobs = int(threads_spin.get_value())
-        suffix = suffix_entry.get_text().strip()
-        use_fakeroot = fakeroot_check.get_active()
-        sign_for_secureboot = secureboot_check and secureboot_check.get_active()
-
-        dialog.destroy()
-        compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot)
+    signing_key = find_signing_key(sb_manager)
+    secureboot_check = Gtk.CheckButton(label=i18n._("dialog.compile.sign_for_secureboot"))
+    form.append(secureboot_check)
+    if signing_key:
+        secureboot_check.set_active(sb_manager.should_prompt_for_signing())
+        hint = i18n._("dialog.compile.secureboot_info") + f"\n🔑 {signing_key[0].name}"
     else:
-        dialog.destroy()
+        secureboot_check.set_sensitive(False)
+        hint = i18n._("dialog.compile.no_signing_key")
+    form.append(markup_label(f"<small><i>{GLib.markup_escape_text(hint)}</i></small>"))
+
+    form.append(markup_label(f"<i>{i18n._('dialog.compile.estimated_time')}</i>"))
+
+    def on_compile():
+        compile_kernel(main_window, int(threads_spin.get_value()), suffix_entry.get_text().strip(),
+                       fakeroot_check.get_active(), signing_key if secureboot_check.get_active() else None)
+
+    main_window.dialogs.form(i18n._("dialog.compile.title"), form,
+                             i18n._("dialog.compile.button_compile"), on_compile)
 
 
-def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=False):
+def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
     """Lance la compilation dans un terminal"""
     i18n = get_i18n()
     linux_dir = main_window.kernel_manager.base_dir / "linux"
@@ -122,7 +89,7 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
 
     try:
         kernel_version = linux_dir.resolve().name.replace("linux-", "")
-    except:
+    except Exception:
         kernel_version = "unknown"
 
     # Sauvegarder la config
@@ -133,8 +100,6 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
 
 
     start_time = datetime.now()
-
-    sb_manager = main_window.secureboot_manager
 
     # Debian active CONFIG_MODULE_COMPRESS_XZ : on désactive la compression des modules
     # dans le .config pour que les signatures SecureBoot posées avant bindeb-pkg restent valides
@@ -184,11 +149,8 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
     # Signature SecureBoot des modules AVANT bindeb-pkg (CONFIG_MODULE_COMPRESS_NONE=y
     # garantit que les modules restent en .ko)
     sign_config = None
-    if sign_for_secureboot:
-        keys = list(sb_manager.keys_dir.glob("*.priv"))
-        key_file = next((k for k in keys if k.stem == "MOK"), keys[0] if keys else None)
-        if key_file and key_file.with_suffix('.der').exists():
-            sign_config = {"key": str(key_file), "cert": str(key_file.with_suffix('.der'))}
+    if signing_key:
+        sign_config = {"key": str(signing_key[0]), "cert": str(signing_key[1])}
 
     suffix_label = suffix or i18n._("compilation.suffix_none")
     header = [
@@ -198,7 +160,7 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
         i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no"))),
     ]
     if sign_config:
-        header.append("SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + " (AVANT bindeb-pkg)")
+        header.append(i18n._("compilation.secureboot_signing", key=sign_config["key"]))
     header += ["", i18n._("compilation.starting")]
 
     status_file = log_file.with_suffix(".status.json")
@@ -259,7 +221,7 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
             main_window.kernel_manager.send_notification(
                 i18n._("message.success.compilation_success"),
                 i18n._("message.success.compilation_success_notification", version=kernel_version, suffix=suffix, time=f"{duration//60}m {duration%60}s"),
-                "low"
+                "normal"
             )
         else:
             main_window.kernel_manager.send_notification(

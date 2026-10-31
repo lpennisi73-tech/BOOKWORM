@@ -56,7 +56,7 @@ class SecureBootManager:
         """Vide le cache MOK pour forcer une nouvelle lecture"""
         with self._mok_cache_lock:
             self._mok_cache = None
-            print("[DEBUG] MOK cache cleared")
+            logging.debug("Cache MOK vidé")
 
     # ==================== Historique ====================
 
@@ -227,9 +227,14 @@ class SecureBootManager:
                 success, output, error = PkexecHelper.mokutil_diagnose()
 
                 if not success:
+                    # Échec (mot de passe refusé, helper absent…) mis en cache aussi : sinon
+                    # chaque vérification du diagnostic redemanderait le mot de passe.
+                    # Le bouton « Lancer le diagnostic » vide le cache pour réessayer.
                     logging.warning(f"mokutil-diagnose: {error}")
-                    return {'enrolled_output': '', 'pending_output': '',
-                            'efi_shim': None, 'efi_mok_manager': None}
+                    self._mok_cache = {'enrolled_output': '', 'pending_output': '',
+                                       'efi_shim': None, 'efi_mok_manager': None,
+                                       'error': error}
+                    return self._mok_cache
 
                 # Sortie du helper :
                 #   EFI_SHIM:<chemin>  EFI_MOKMANAGER:<chemin>  ENROLLED: ...  PENDING: ...
@@ -443,7 +448,7 @@ class SecureBootManager:
                 keys = self._parse_mok_list(output)
                 return {'success': True, 'keys': keys, 'raw_output': output}
             else:
-                return {'success': False, 'error': 'Unable to fetch MOK data', 'keys': []}
+                return {'success': False, 'error': mok_data.get('error') or 'Unable to fetch MOK data', 'keys': []}
         except Exception as e:
             return {'success': False, 'error': str(e), 'keys': []}
 

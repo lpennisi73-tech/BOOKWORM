@@ -1,11 +1,11 @@
 """
-Fenêtre principale de l'application
+Fenêtre principale de l'application (GTK4 + libadwaita)
 """
 
 import gi
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk
-from pathlib import Path
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from core.kernel_manager import KernelManager
 from core.secureboot_manager import SecureBootManager
@@ -13,156 +13,118 @@ from utils.dialogs import DialogHelper
 from utils.i18n import get_i18n
 from utils import paths
 
+# (nom de page, clé de traduction, icône, module, fonction de création)
+PAGES = [
+    ("kernels", "tab.kernels", "computer-symbolic", "gui.kernels_tab", "create_kernels_tab"),
+    ("packages", "tab.packages", "package-x-generic-symbolic", "gui.packages_tab", "create_packages_tab"),
+    ("build", "tab.build", "applications-engineering-symbolic", "gui.build_tab", "create_build_tab"),
+    ("drivers", "tab.drivers", "video-display-symbolic", "gui.drivers_tab", "create_drivers_tab"),
+    ("secureboot", "tab.secureboot", "security-high-symbolic", "gui.secureboot_tab", "create_secureboot_tab"),
+    ("sources", "tab.sources", "folder-symbolic", "gui.sources_tab", "create_sources_tab"),
+    ("profiles", "tab.profiles", "document-properties-symbolic", "gui.profiles_tab", "create_profiles_tab"),
+    ("history", "tab.history", "document-open-recent-symbolic", "gui.history_tab", "create_history_tab"),
+    ("cleanup", "tab.cleanup", "user-trash-symbolic", "gui.cleanup_tab", "create_cleanup_tab"),
+]
 
-class KernelManagerWindow(Gtk.Window):
+LANGUAGES = [("en", "English"), ("fr", "Français")]
+
+
+class KernelManagerWindow(Adw.ApplicationWindow):
     """Fenêtre principale de l'application"""
-    
-    def __init__(self):
+
+    def __init__(self, application, version=""):
+        super().__init__(application=application)
         self.i18n = get_i18n()
-        super().__init__(title=self.i18n._("window.title"))
-        self.set_default_size(900, 600)
-        self.set_border_width(10)
+        self.version = version
+        self.set_title(self.i18n._("window.title"))
+        self.set_default_size(1180, 760)
+        self.set_size_request(760, 520)
 
         self.kernel_manager = KernelManager()
+        self.kernel_manager.notifier = application.notify
         self.secureboot_manager = SecureBootManager()
         self.dialogs = DialogHelper(self)
 
-        # Définir le nom de l'application pour GNOME Shell
-        self.set_wmclass("KernelCustom Manager", "KernelCustom Manager")
-
-        # Icône de la fenêtre et de la barre des tâches
-        try:
-            # Essayer icon.png d'abord (plus léger et plus compatible)
-            icon_path = paths.ICON_PNG
-            if icon_path.exists():
-                self.set_icon_from_file(str(icon_path))
-                # Définir aussi comme icône par défaut pour toutes les fenêtres
-                Gtk.Window.set_default_icon_from_file(str(icon_path))
-            else:
-                # Fallback sur icon.svg
-                icon_path = paths.ICON_SVG
-                if icon_path.exists():
-                    self.set_icon_from_file(str(icon_path))
-                    Gtk.Window.set_default_icon_from_file(str(icon_path))
-                else:
-                    self.set_icon_name("system-software-update")
-        except Exception as e:
-            print(f"Erreur lors du chargement de l'icône: {e}")
-            self.set_icon_name("system-software-update")
-        
-        # Header Bar
-        headerbar = Gtk.HeaderBar()
-        headerbar.set_show_close_button(True)
-        headerbar.props.title = self.i18n._("window.title")
-        headerbar.props.subtitle = self.i18n._("window.subtitle")
-
-        # Language selector
-        lang_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        lang_label = Gtk.Label(label="🌐")
-        lang_box.pack_start(lang_label, False, False, 0)
-
-        self.lang_combo = Gtk.ComboBoxText()
-        self.lang_combo.append("en", "English")
-        self.lang_combo.append("fr", "Français")
-        self.lang_combo.set_active_id(self.i18n.get_language())
-        self.lang_combo.connect("changed", self.on_language_changed)
-        lang_box.pack_start(self.lang_combo, False, False, 0)
-
-        headerbar.pack_end(lang_box)
-
-        self.set_titlebar(headerbar)
-
+        self._install_actions()
         self.create_ui()
-    
+
+    # ==================== Interface ====================
+
     def create_ui(self):
         """Crée l'interface utilisateur"""
-        self.stack = Gtk.Stack()
-        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        
-        # Import des onglets
-        from gui.kernels_tab import create_kernels_tab
-        from gui.packages_tab import create_packages_tab
-        from gui.build_tab import create_build_tab
-        from gui.drivers_tab import create_drivers_tab
-        from gui.secureboot_tab import create_secureboot_tab
-        from gui.profiles_tab import create_profiles_tab
-        from gui.history_tab import create_history_tab
-        from gui.sources_tab import create_sources_tab
-        
-        # Ajouter les onglets
-        self.stack.add_titled(
-            create_kernels_tab(self),
-            "kernels",
-            self.i18n._("tab.kernels")
+        import importlib
+
+        self.stack = Adw.ViewStack(vexpand=True)
+        for name, title_key, icon, module_name, factory in PAGES:
+            module = importlib.import_module(module_name)
+            page = getattr(module, factory)(self)
+            self.stack.add_titled_with_icon(page, name, self.i18n._(title_key), icon)
+
+        header = Adw.HeaderBar()
+        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE)
+        header.set_title_widget(switcher)
+
+        menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=self._build_menu(),
+                                     tooltip_text=self.i18n._("menu.main"), primary=True)
+        header.pack_end(menu_button)
+
+        # Fenêtre étroite (9 onglets : ~1600 px en largeur naturelle) : le sélecteur passe en bas
+        switcher_bar = Adw.ViewSwitcherBar(stack=self.stack)
+        breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 1550sp"))
+        breakpoint.add_setter(header, "title-widget", Adw.WindowTitle(
+            title=self.i18n._("window.title"), subtitle=self.version))
+        breakpoint.add_setter(switcher_bar, "reveal", True)
+        self.add_breakpoint(breakpoint)
+
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header)
+        toolbar_view.set_content(self.stack)
+        toolbar_view.add_bottom_bar(switcher_bar)
+
+        self.toast_overlay = Adw.ToastOverlay(child=toolbar_view)
+        self.dialogs.toast_overlay = self.toast_overlay
+        self.set_content(self.toast_overlay)
+
+    def _build_menu(self):
+        menu = Gio.Menu()
+        languages = Gio.Menu()
+        for code, name in LANGUAGES:
+            languages.append(name, f"win.language::{code}")
+        menu.append_submenu(f"🌐 {self.i18n._('menu.language')}", languages)
+        section = Gio.Menu()
+        section.append(self.i18n._("menu.about"), "win.about")
+        section.append(self.i18n._("menu.quit"), "app.quit")
+        menu.append_section(None, section)
+        return menu
+
+    def _install_actions(self):
+        language = Gio.SimpleAction.new_stateful(
+            "language", GLib.VariantType.new("s"), GLib.Variant.new_string(self.i18n.get_language()))
+        language.connect("activate", self.on_language_changed)
+        self.add_action(language)
+
+        about = Gio.SimpleAction.new("about", None)
+        about.connect("activate", lambda *a: self.show_about())
+        self.add_action(about)
+
+    # ==================== Actions ====================
+
+    def on_language_changed(self, action, value):
+        new_lang = value.get_string()
+        if new_lang == self.i18n.get_language():
+            return
+        action.set_state(value)
+        self.i18n.set_language(new_lang)
+        # Message dans la NOUVELLE langue
+        self.dialogs.show_info(self.i18n._("language.changed_title"), self.i18n._("language.restart"))
+
+    def show_about(self):
+        about = Adw.AboutDialog(
+            application_name=self.i18n._("window.title"),
+            application_icon=paths.APPLICATION_ID,
+            version=self.version,
+            comments=self.i18n._("about.comments"),
+            license_type=Gtk.License.GPL_3_0,
+            developer_name="KernelCustom Manager",
         )
-
-        self.stack.add_titled(
-            create_packages_tab(self),
-            "packages",
-            self.i18n._("tab.packages")
-        )
-
-        self.stack.add_titled(
-            create_build_tab(self),
-            "build",
-            self.i18n._("tab.build")
-        )
-
-        self.stack.add_titled(
-            create_drivers_tab(self),
-            "drivers",
-            self.i18n._("tab.drivers")
-        )
-
-        self.stack.add_titled(
-            create_secureboot_tab(self),
-            "secureboot",
-            self.i18n._("tab.secureboot")
-        )
-
-        self.stack.add_titled(
-            create_sources_tab(self),
-            "sources",
-            self.i18n._("tab.sources")
-        )
-
-        self.stack.add_titled(
-            create_profiles_tab(self),
-            "profiles",
-            self.i18n._("tab.profiles")
-        )
-
-        self.stack.add_titled(
-            create_history_tab(self),
-            "history",
-            self.i18n._("tab.history")
-        )
-        
-        # Stack Switcher
-        stack_switcher = Gtk.StackSwitcher()
-        stack_switcher.set_stack(self.stack)
-        
-        # Layout principal
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        vbox.pack_start(stack_switcher, False, False, 0)
-        vbox.pack_start(self.stack, True, True, 0)
-
-        self.add(vbox)
-
-    def on_language_changed(self, combo):
-        """Handle language change"""
-        new_lang = combo.get_active_id()
-        if new_lang and new_lang != self.i18n.get_language():
-            self.i18n.set_language(new_lang)
-            # Show restart message
-            dialog = Gtk.MessageDialog(
-                transient_for=self,
-                flags=0,
-                message_type=Gtk.MessageType.INFO,
-                buttons=Gtk.ButtonsType.OK,
-                text="Language Changed" if new_lang == "en" else "Langue modifiée"
-            )
-            message = "Please restart the application for the language change to take effect." if new_lang == "en" else "Veuillez redémarrer l'application pour que le changement de langue prenne effet."
-            dialog.format_secondary_text(message)
-            dialog.run()
-            dialog.destroy()
+        about.present(self)

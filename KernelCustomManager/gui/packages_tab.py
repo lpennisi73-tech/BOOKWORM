@@ -1,13 +1,14 @@
 """
-Onglet de gestion des paquets locaux
+Onglet de gestion des paquets locaux (.deb compilés)
 """
 
-import gi
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
-import threading
 import re
 from pathlib import Path
+
+from gi.repository import Gtk
+
+from gui.widgets import SimpleList, button, button_row, markup_label, page_box
+from utils.dialogs import run_task
 from utils.i18n import get_i18n
 from utils.pkexec_helper import PkexecHelper
 
@@ -15,181 +16,88 @@ from utils.pkexec_helper import PkexecHelper
 def create_packages_tab(main_window):
     """Crée l'onglet de gestion des paquets"""
     i18n = get_i18n()
+    box = page_box()
 
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+    packages = SimpleList([i18n._("kernel.column_package"), i18n._("kernel.column_size")], expand=[0],
+                          on_activate=lambda row: install_package(main_window, packages))
+    box.append(packages)
 
-    # Liste des paquets
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_vexpand(True)
+    box.append(button_row(
+        button(i18n._("button.refresh"), lambda: refresh_packages(main_window, packages)),
+        button(i18n._("button.install"), lambda: install_package(main_window, packages), "suggested-action"),
+    ))
 
-    packages_store = Gtk.ListStore(str, str)  # name, size
-    packages_view = Gtk.TreeView(model=packages_store)
-
-    for i, title in enumerate([i18n._("kernel.column_package"), i18n._("kernel.column_size")]):
-        renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn(title, renderer, text=i)
-        column.set_resizable(True)
-        packages_view.append_column(column)
-    
-    scrolled.add(packages_view)
-    box.pack_start(scrolled, True, True, 0)
-    
-    # Boutons
-    btn_box = Gtk.Box(spacing=5)
-
-    refresh_btn = Gtk.Button(label=i18n._("button.refresh"))
-    refresh_btn.connect("clicked", lambda w: refresh_packages(main_window, packages_store))
-    btn_box.pack_start(refresh_btn, False, False, 0)
-
-    install_btn = Gtk.Button(label=i18n._("button.install"))
-    install_btn.connect("clicked", lambda w: install_package(main_window, packages_view, packages_store))
-    btn_box.pack_start(install_btn, False, False, 0)
-    
-    box.pack_start(btn_box, False, False, 0)
-    
-    refresh_packages(main_window, packages_store)
-    
+    refresh_packages(main_window, packages)
     return box
 
 
-def refresh_packages(main_window, store):
+def refresh_packages(main_window, packages):
     """Actualise la liste des paquets"""
-    store.clear()
-    for pkg in main_window.kernel_manager.get_local_packages():
-        store.append([pkg['name'], pkg['size']])
+    packages.set_rows([pkg['name'], pkg['size']] for pkg in main_window.kernel_manager.get_local_packages())
 
 
-def install_package(main_window, view, store):
-    """Installe un paquet sélectionné"""
+def _find_headers(repo_dir, package_name):
+    """Paquet linux-headers correspondant à un linux-image, ou None"""
+    match = re.search(r'linux-image-([^_]+)', package_name)
+    if not match:
+        return None
+    return next(iter(sorted(repo_dir.glob(f"linux-headers-{match.group(1)}_*.deb"))), None)
+
+
+def install_package(main_window, packages):
+    """Installe un paquet sélectionné (avec ses headers si disponibles)"""
     i18n = get_i18n()
-    selection = view.get_selection()
-    model, treeiter = selection.get_selected()
-
-    if not treeiter:
+    row = packages.selected()
+    if row is None:
         main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.select_package"))
         return
-    
-    package_name = model[treeiter][0]
-    package_path = main_window.kernel_manager.repo_dir / package_name
-    
-    # Chercher les headers correspondants
-    match = re.search(r'linux-image-([^_]+)', package_name)
-    if match:
-        kernel_version = match.group(1)
-        headers_pkg = f"linux-headers-{kernel_version}"
-        
-        headers_file = None
-        for deb in main_window.kernel_manager.repo_dir.glob(f"{headers_pkg}*.deb"):
-            headers_file = deb
-            break
-    else:
-        headers_file = None
-    
-    # Dialogue d'options
-    dialog = Gtk.Dialog(
-        title=i18n._("dialog.install_options.title"),
-        transient_for=main_window,
-        flags=0
-    )
-    dialog.set_default_size(450, 200)
 
-    content = dialog.get_content_area()
-    content.set_spacing(15)
-    content.set_margin_start(20)
-    content.set_margin_end(20)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
+    repo_dir = main_window.kernel_manager.repo_dir
+    package_name = row[0]
+    package_path = repo_dir / package_name
+    headers_file = _find_headers(repo_dir, package_name)
 
-    info = Gtk.Label()
-    info.set_markup(f"<b>{i18n._('message.info.title')}</b>\n{package_name}")
-    info.set_halign(Gtk.Align.START)
-    content.pack_start(info, False, False, 0)
-
-    headers_check = Gtk.CheckButton(label=i18n._("dialog.install_options.install_headers"))
+    # Options d'installation
+    form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    form.append(markup_label(f"<b>{i18n._('message.info.title')}</b>\n{package_name}"))
     if headers_file:
-        headers_check.set_active(True)
-        headers_check.set_sensitive(True)
-        headers_label = Gtk.Label()
-        headers_label.set_markup(f"<small>{headers_file.name}</small>")
-        headers_label.set_halign(Gtk.Align.START)
-        headers_label.set_margin_start(30)
-        content.pack_start(headers_check, False, False, 0)
-        content.pack_start(headers_label, False, False, 0)
+        headers_check = Gtk.CheckButton(label=i18n._("dialog.install_options.install_headers"), active=True)
+        form.append(headers_check)
+        form.append(markup_label(f"<small>{headers_file.name}</small>"))
     else:
-        headers_check.set_active(False)
-        headers_check.set_sensitive(False)
-        headers_check.set_label(i18n._("dialog.install_options.install_headers_unavailable"))
-        content.pack_start(headers_check, False, False, 0)
+        headers_check = Gtk.CheckButton(label=i18n._("dialog.install_options.install_headers_unavailable"),
+                                        active=False, sensitive=False)
+        form.append(headers_check)
 
-    dialog.add_button(i18n._("button.cancel"), Gtk.ResponseType.CANCEL)
-    dialog.add_button(i18n._("button.install"), Gtk.ResponseType.OK)
-    
-    dialog.show_all()
-    response = dialog.run()
-    
-    if response != Gtk.ResponseType.OK:
-        dialog.destroy()
-        return
-    
-    install_headers = headers_check.get_active() and headers_file is not None
-    dialog.destroy()
-    
-    # Installation avec progression
-    progress_dialog = Gtk.Dialog(
-        title=i18n._("dialog.install_kernel.title"),
-        transient_for=main_window,
-        flags=0
-    )
-    progress_dialog.set_default_size(500, 150)
+    def on_install():
+        to_install = [str(package_path)]
+        if headers_file and headers_check.get_active():
+            to_install.append(str(headers_file))
+        _run_install(main_window, to_install)
 
-    content = progress_dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(20)
-    content.set_margin_end(20)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
+    main_window.dialogs.form(i18n._("dialog.install_options.title"), form, i18n._("button.install"), on_install)
 
-    status_label = Gtk.Label()
-    status_label.set_text(i18n._("dialog.install_kernel.preparing"))
-    content.pack_start(status_label, False, False, 0)
-    
-    progress = Gtk.ProgressBar()
-    progress.set_show_text(True)
-    content.pack_start(progress, False, False, 0)
-    
-    progress_dialog.show_all()
-    
-    def install_thread():
-        try:
-            packages_to_install = [str(package_path)]
-            if install_headers:
-                packages_to_install.append(str(headers_file))
 
-            pkg_names = ", ".join([Path(p).name for p in packages_to_install])
+def _run_install(main_window, to_install):
+    i18n = get_i18n()
+    names = [Path(p).name for p in to_install]
+    progress = main_window.dialogs.progress(
+        i18n._("dialog.install_kernel.title"),
+        i18n._("dialog.install_kernel.installing", package=", ".join(names)))
+    progress.pulse()
 
-            GLib.idle_add(lambda: status_label.set_text(i18n._("dialog.install_kernel.installing", package=pkg_names)))
-            GLib.idle_add(lambda: progress.set_fraction(0.5))
-            GLib.idle_add(lambda: progress.set_text("50%"))
+    def done(result):
+        progress.close()
+        success, _, error = result
+        if success:
+            main_window.dialogs.show_info(i18n._("message.success.title"), i18n._(
+                "message.success.packages_installed", packages="\n• ".join(names)))
+        else:
+            main_window.dialogs.show_error(i18n._("message.error.install_failed"), error)
 
-            # Helper privilégié : apt-get install des .deb (dépendances résolues)
-            success, _, error = PkexecHelper.install_packages(*packages_to_install)
-            if not success:
-                raise Exception(error)
-            
-            GLib.idle_add(lambda: progress.set_fraction(1.0))
-            GLib.idle_add(lambda: progress.set_text("100%"))
-            GLib.idle_add(progress_dialog.destroy)
+    def failed(error):
+        progress.close()
+        main_window.dialogs.show_error(i18n._("message.error.install_failed"), str(error))
 
-            installed_list = "\n• ".join([Path(p).name for p in packages_to_install])
-            GLib.idle_add(
-                main_window.dialogs.show_info,
-                i18n._("message.success.title"),
-                i18n._("message.success.packages_installed", packages=installed_list)
-            )
-
-        except Exception as e:
-            GLib.idle_add(progress_dialog.destroy)
-            GLib.idle_add(main_window.dialogs.show_error, i18n._("message.error.install_failed"), str(e))
-    
-    thread = threading.Thread(target=install_thread, daemon=True)
-    thread.start()
+    # Helper privilégié : apt-get install des .deb (dépendances résolues)
+    run_task(lambda: PkexecHelper.install_packages(*to_install), done, failed)

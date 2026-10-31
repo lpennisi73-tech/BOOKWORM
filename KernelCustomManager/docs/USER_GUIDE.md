@@ -38,8 +38,8 @@ python3 kernelcustom_manager.py
 ### System Requirements
 
 - Debian 13 (Trixie) or Debian 14 (Forky)
-- Python 3.8 or newer
-- GTK 3.0
+- Python 3.11 or newer
+- GTK 4 + libadwaita 1.6 or newer
 - At least 20 GB free disk space (for kernel compilation)
 - Internet connection (for downloading kernels/drivers)
 
@@ -750,12 +750,12 @@ Date                 Version   Suffix    Duration  Status
 
 **Check GTK dependencies:**
 ```bash
-python3 -c "import gi; gi.require_version('Gtk', '3.0')"
+python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')"
 ```
 
 If error, install:
 ```bash
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
 ```
 
 **Check permissions:**

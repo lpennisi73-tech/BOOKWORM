@@ -11,7 +11,8 @@
     "profiles": "Profiles",
     "history": "History",
     "drivers": "GPU Drivers",
-    "secureboot": "SecureBoot"
+    "secureboot": "SecureBoot",
+    "cleanup": "Cleanup"
   },
   "kernel": {
     "active": "Active Kernel:",
@@ -37,7 +38,9 @@
     "cancel": "Cancel",
     "select": "Select",
     "later": "Later",
-    "reboot_now": "Reboot Now"
+    "reboot_now": "Reboot Now",
+    "yes": "Yes",
+    "no": "No"
   },
   "tooltip": {
     "update_stable": "Update to the latest stable version"
@@ -73,7 +76,8 @@
       "profile_delete_failed": "Cannot delete:\n{error}",
       "select_version": "Please select a version",
       "invalid_version": "Invalid version",
-      "invalid_suffix": "Invalid suffix: use only letters, digits and the characters . _ + ~ - (e.g. -kernelcustom)"
+      "invalid_suffix": "Invalid suffix: use only letters, digits and the characters . _ + ~ - (e.g. -kernelcustom)",
+      "make_missing": "make not found: install build-essential (sudo apt install build-essential)."
     },
     "confirm": {
       "title": "Confirm",
@@ -156,7 +160,8 @@
       "sign_for_secureboot": "🔒 Sign for SecureBoot (recommended if enabled)",
       "secureboot_info": "Modules will be automatically signed before creating the .deb",
       "estimated_time": "Estimated time: 30-90 minutes",
-      "button_compile": "🔨 Compile"
+      "button_compile": "🔨 Compile",
+      "no_signing_key": "No MOK key: generate one in the SecureBoot tab to sign modules at build time."
     },
     "import_config": {
       "title": "Import Configuration",
@@ -210,7 +215,8 @@
     "failed": "❌ COMPILATION FAILED!",
     "return_code": "Return code: {code}",
     "press_enter": "Press Enter to close...",
-    "failed_notification": "Error during kernel {version}{suffix} compilation"
+    "failed_notification": "Error during kernel {version}{suffix} compilation",
+    "secureboot_signing": "SecureBoot module signing: yes (before bindeb-pkg, key {key})"
   },
   "profiles": {
     "title": "Configuration Profiles",
@@ -492,7 +498,19 @@
       "sol_sign_modules": "Sign kernel modules and vmlinuz (use Signing tab)",
       "sol_regenerate_initrd": "Regenerate initrd after signing modules",
       "sol_verify_sb_config": "Verify SecureBoot configuration"
-    }
+    },
+    "clear_history_confirm": "Clear the SecureBoot history?",
+    "dep": {
+      "kmod": "kernel module tools",
+      "mokutil": "MOK key management",
+      "openssl": "key generation",
+      "sbsigntool": "UEFI signing of vmlinuz",
+      "sign_file": "module signing"
+    },
+    "diag_on_open": "The diagnosis starts when this tab is opened (the administrator password may be requested to read the MOK keys).",
+    "importing": "Importing the key",
+    "regenerating_initrd": "Regenerating the initrd of {version}…\n⚙️ Required for SecureBoot to work",
+    "signature_issues": "Signature issues detected:"
   },
   "cleanup": {
     "title": "🧹 Working directory cleanup",
@@ -524,6 +542,20 @@
       "active_build": "Active build directory",
       "installed_kernel": "Installed kernel (package copy)",
       "secureboot_keys": "Required to sign kernels"
-    }
+    },
+    "empty": "Nothing to clean"
+  },
+  "about": {
+    "comments": "Build and manage custom Linux kernels on Debian: packages, sources, GPU drivers and SecureBoot."
+  },
+  "language": {
+    "changed_title": "Language changed",
+    "restart": "Please restart the application for the language change to take effect."
+  },
+  "menu": {
+    "main": "Main menu",
+    "language": "Language",
+    "about": "About",
+    "quit": "Quit"
   }
 }

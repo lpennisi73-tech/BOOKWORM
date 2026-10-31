@@ -1,297 +1,193 @@
 """
 Onglet de gestion SecureBoot
-Interface pour vérifier le statut, gérer les clés MOK et configurer SecureBoot
+Diagnostic, statut, clés MOK, signature des modules et de vmlinuz, historique
 """
 
-import gi
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib, Pango
-import threading
+import logging
+import os
+import re
+import subprocess
+from datetime import datetime
 
+from gi.repository import GLib, Gtk
+
+from gui.widgets import (button, button_row, clear_box, entry, info_bar, inner_tabs, labeled,
+                         markup_label, monospace_view, page_box, run_once_when_mapped, section)
+from utils.dialogs import run_task
+from utils.i18n import get_i18n
 from utils.pkexec_helper import PkexecHelper
 from utils.terminal import launch_in_terminal
-import subprocess
-from pathlib import Path
-from datetime import datetime
-from utils.i18n import get_i18n
-from core.secureboot_manager import SecureBootManager
+
+esc = GLib.markup_escape_text
+
+KEY_FILTERS_PATTERNS = ["*.der", "*.cer", "*.crt", "*.pem", "*.priv", "*.key"]
 
 
-def create_secureboot_tab(main_window):
-    """Crée l'onglet de gestion SecureBoot"""
-    i18n = get_i18n()
+class SecureBootPage:
+    """État et widgets de l'onglet SecureBoot"""
 
-    # Utiliser l'instance partagée du SecureBoot manager
-    sb_manager = main_window.secureboot_manager
+    def __init__(self, main_window):
+        self.win = main_window
+        self.dialogs = main_window.dialogs
+        self.i18n = get_i18n()
+        self.sb = main_window.secureboot_manager
 
-    # Container principal avec notebook (onglets internes)
-    main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+    # ==================== Construction ====================
 
-    # === Barre d'informations système en haut ===
-    system_info_bar = create_system_info_bar(sb_manager, i18n)
-    main_box.pack_start(system_info_bar, False, False, 0)
+    def build(self):
+        i18n = self.i18n
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root.append(self._build_info_bar())
 
-    # === Notebook pour les sections ===
-    notebook = Gtk.Notebook()
-    notebook.set_tab_pos(Gtk.PositionType.TOP)
+        tabs, _stack = inner_tabs([
+            ("wizard", "🚀 " + i18n._("secureboot.tab_wizard"), self._build_wizard()),
+            ("status", i18n._("secureboot.tab_status"), self._build_status()),
+            ("keys", i18n._("secureboot.tab_keys"), self._build_keys()),
+            ("signing", i18n._("secureboot.tab_signing"), self._build_signing()),
+            ("history", i18n._("secureboot.tab_history"), self._build_history()),
+        ])
+        root.append(tabs)
 
-    # Onglet 0: Assistant/Wizard (NOUVEAU - Premier onglet)
-    wizard_tab = create_wizard_tab(main_window, sb_manager, i18n)
-    notebook.append_page(wizard_tab, Gtk.Label(label="🚀 " + i18n._("secureboot.tab_wizard")))
+        # Le diagnostic et la liste des clés MOK passent par pkexec (mot de passe) :
+        # on attend que l'utilisateur ouvre l'onglet au lieu de les lancer au démarrage
+        # (une seule lecture pkexec : la liste des clés réutilise le cache du diagnostic)
+        run_once_when_mapped(root, lambda: self.run_diagnosis(clear_cache=False))
 
-    # Onglet 1: Statut SecureBoot
-    status_tab = create_status_tab(main_window, sb_manager, i18n)
-    notebook.append_page(status_tab, Gtk.Label(label=i18n._("secureboot.tab_status")))
+        self.update_history()
+        return root
 
-    # Onglet 2: Gestion des clés
-    keys_tab = create_keys_tab(main_window, sb_manager, i18n)
-    notebook.append_page(keys_tab, Gtk.Label(label=i18n._("secureboot.tab_keys")))
+    def _build_info_bar(self):
+        i18n = self.i18n
+        enabled = f"<span color='green'>{i18n._('secureboot.enabled')}</span>"
+        if not self.sb.is_uefi_system():
+            return info_bar(f"<b>🔒 UEFI:</b> <span color='red'>{i18n._('secureboot.disabled')}</span>")
 
-    # Onglet 3: Signature de modules
-    signing_tab = create_signing_tab(main_window, sb_manager, i18n)
-    notebook.append_page(signing_tab, Gtk.Label(label=i18n._("secureboot.tab_signing")))
+        status = self.sb.get_secureboot_status()
+        items = [
+            f"<b>🔒 UEFI:</b> {enabled}",
+            f"<b>🛡️ SecureBoot:</b> " + (enabled if status['enabled'] else
+                                         f"<span color='orange'>{i18n._('secureboot.disabled')}</span>"),
+        ]
+        if self.sb.check_setup_mode():
+            items.append(f"<b>⚙️ {i18n._('secureboot.setup_mode')}:</b> "
+                         f"<span color='orange'>{i18n._('secureboot.active')}</span>")
+        return info_bar(*items)
 
-    # Onglet 4: Historique
-    history_tab = create_history_tab(sb_manager, i18n)
-    notebook.append_page(history_tab, Gtk.Label(label=i18n._("secureboot.tab_history")))
+    # ==================== Assistant ====================
 
-    main_box.pack_start(notebook, True, True, 0)
+    def _build_wizard(self):
+        i18n = self.i18n
+        box = page_box(spacing=16, margin=18)
 
-    return main_box
+        title = markup_label(f"<big><b>🔒 {i18n._('secureboot.wizard_title')}</b></big>")
+        title.set_xalign(0.5)
+        box.append(title)
 
+        diagnosis, inner = section("📊 " + i18n._("secureboot.auto_diagnosis"))
+        self.diagnosis_label = markup_label(f"<i>{i18n._('secureboot.diag_on_open')}</i>", selectable=True)
+        inner.append(self.diagnosis_label)
+        box.append(diagnosis)
 
-def create_system_info_bar(sb_manager, i18n):
-    """Crée la barre d'informations système"""
-    frame = Gtk.Frame()
-    frame.set_shadow_type(Gtk.ShadowType.IN)
+        actions, self.actions_box = section("⚡ " + i18n._("secureboot.recommended_actions"))
+        box.append(actions)
 
-    hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
-    hbox.set_margin_start(10)
-    hbox.set_margin_end(10)
-    hbox.set_margin_top(5)
-    hbox.set_margin_bottom(5)
+        self.diagnose_button = button("🔍 " + i18n._("secureboot.run_diagnosis"),
+                                      lambda: self.run_diagnosis(clear_cache=True), "suggested-action")
+        self.diagnose_button.set_halign(Gtk.Align.CENTER)
+        self.diagnose_button.add_css_class("pill")
+        box.append(self.diagnose_button)
 
-    # Système UEFI
-    is_uefi = sb_manager.is_uefi_system()
-    uefi_label = Gtk.Label()
-    if is_uefi:
-        uefi_label.set_markup(f"<b>🔒 UEFI:</b> <span color='green'>{i18n._('secureboot.enabled')}</span>")
-    else:
-        uefi_label.set_markup(f"<b>🔒 UEFI:</b> <span color='red'>{i18n._('secureboot.disabled')}</span>")
-    hbox.pack_start(uefi_label, False, False, 0)
+        return Gtk.ScrolledWindow(child=box, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
 
-    # Statut SecureBoot
-    if is_uefi:
-        sb_status = sb_manager.get_secureboot_status()
-        sb_label = Gtk.Label()
-        if sb_status['enabled']:
-            sb_label.set_markup(f"<b>🛡️ SecureBoot:</b> <span color='green'>{i18n._('secureboot.enabled')}</span>")
+    def run_diagnosis(self, clear_cache=True):
+        """Exécute le diagnostic (thread) et affiche les actions recommandées"""
+        i18n = self.i18n
+        clear_box(self.actions_box)
+        self.diagnosis_label.set_markup(f"<i>{i18n._('secureboot.analyzing')}…</i>")
+        self.diagnose_button.set_sensitive(False)
+
+        def work():
+            if clear_cache:
+                self.sb.clear_mok_cache()  # état actuel (après un enrôlement, un redémarrage…)
+            return self.sb.diagnose_secureboot_issue()
+
+        def done(diag):
+            self.diagnose_button.set_sensitive(True)
+            self.display_diagnosis(diag)
+            self.update_enrolled_keys()  # depuis le cache rempli par le diagnostic
+
+        def failed(error):
+            self.diagnose_button.set_sensitive(True)
+            self.diagnosis_label.set_markup(f"<span color='red'>❌ {esc(str(error))}</span>")
+
+        run_task(work, done, failed)
+
+    def display_diagnosis(self, diag):
+        issue = diag['issue_type']
+
+        if issue == 'OK':
+            self.diagnosis_label.set_markup(f"<span color='green'><b>✅ {esc(diag['message'])}</b></span>")
+        elif issue in ('NOT_UEFI', 'SB_DISABLED'):
+            self.diagnosis_label.set_markup(f"<span color='orange'><b>⚠️ {esc(diag['message'])}</b></span>")
+        elif issue == 'KERNEL_SIGNATURE_ISSUES':
+            icons = {'MODULES_UNSIGNED': ("📦", "Modules"), 'INITRD_UNSIGNED_MODULES': ("💾", "Initrd"),
+                     'VMLINUZ_UNSIGNED': ("🔧", "vmlinuz")}
+            lines = [f"<span color='red'><b>❌ {esc(self.i18n._('secureboot.signature_issues'))}</b></span>"]
+            for kernel_info in diag.get('details', {}).get('kernels', []):
+                lines.append(f"\n<b>Kernel {esc(kernel_info['kernel_version'])} :</b>")
+                for problem in kernel_info['issues']:
+                    icon, name = icons.get(problem['type'], ("•", ""))
+                    lines.append(f"  {icon} {name}: {esc(problem['message'])}")
+            self.diagnosis_label.set_markup('\n'.join(lines))
         else:
-            sb_label.set_markup(f"<b>🛡️ SecureBoot:</b> <span color='orange'>{i18n._('secureboot.disabled')}</span>")
-        hbox.pack_start(sb_label, False, False, 0)
+            self.diagnosis_label.set_markup(f"<span color='red'><b>❌ {esc(diag['message'])}</b></span>")
 
-        # Mode Setup
-        if sb_manager.check_setup_mode():
-            setup_label = Gtk.Label()
-            setup_label.set_markup(f"<b>⚙️ {i18n._('secureboot.setup_mode')}:</b> <span color='orange'>{i18n._('secureboot.active')}</span>")
-            hbox.pack_start(setup_label, False, False, 0)
+        # Solutions, avec un bouton d'action sur la première
+        for index, solution in enumerate(diag['solutions'], 1):
+            row = Gtk.Box(spacing=12)
+            label = markup_label()
+            label.set_text(f"{index}. {solution}")
+            label.set_hexpand(True)
+            row.append(label)
 
-    frame.add(hbox)
-    return frame
+            if index == 1:
+                action = None
+                if issue == 'MOK_NOT_ENROLLED':
+                    action = button("▶️ " + self.i18n._("secureboot.start_enrollment"), self.mok_enrollment_wizard,
+                                    "suggested-action")
+                elif issue == 'MOK_PENDING':
+                    action = button("🔄 " + self.i18n._("button.reboot_now"), self.confirm_reboot)
+                elif issue in ('MODULES_NOT_SIGNED', 'KERNEL_SIGNATURE_ISSUES'):
+                    action = button("▶️ " + self.i18n._("secureboot.start_signing"), self.module_signing_wizard,
+                                    "suggested-action")
+                if action:
+                    action.set_valign(Gtk.Align.CENTER)
+                    row.append(action)
 
+            self.actions_box.append(row)
 
-# ==================== Onglet 0: Assistant/Wizard ====================
+    # ==================== Redémarrage ====================
 
-def create_wizard_tab(main_window, sb_manager, i18n):
-    """Crée l'onglet assistant SecureBoot (wizard)"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
-    box.set_margin_start(20)
-    box.set_margin_end(20)
-    box.set_margin_top(20)
-    box.set_margin_bottom(20)
+    def reboot(self):
+        def done(result):
+            success, _, error = result
+            if not success:
+                self.dialogs.show_error(self.i18n._("message.error.title"), f"Reboot: {error}")
+        run_task(PkexecHelper.reboot, done)
 
-    # Titre
-    title = Gtk.Label()
-    title.set_markup("<big><b>🔒 " + i18n._("secureboot.wizard_title") + "</b></big>")
-    box.pack_start(title, False, False, 0)
+    def confirm_reboot(self):
+        i18n = self.i18n
+        self.dialogs.ask("🔄 " + i18n._("button.reboot_now") + " ?", i18n._("secureboot.reboot_confirm_message"),
+                         on_yes=self.reboot, destructive=True)
 
-    # Zone de diagnostic
-    diagnosis_frame = Gtk.Frame(label="📊 " + i18n._("secureboot.auto_diagnosis"))
-    diagnosis_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    diagnosis_box.set_margin_start(10)
-    diagnosis_box.set_margin_end(10)
-    diagnosis_box.set_margin_top(10)
-    diagnosis_box.set_margin_bottom(10)
+    # ==================== Enrôlement MOK ====================
 
-    diagnosis_label = Gtk.Label()
-    diagnosis_label.set_line_wrap(True)
-    diagnosis_label.set_xalign(0)
-    diagnosis_box.pack_start(diagnosis_label, False, False, 0)
+    def mok_enrollment_wizard(self):
+        i18n = self.i18n
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                      margin_top=12, margin_bottom=18, margin_start=18, margin_end=18)
 
-    diagnosis_frame.add(diagnosis_box)
-    box.pack_start(diagnosis_frame, False, False, 0)
-
-    # Zone d'actions
-    actions_frame = Gtk.Frame(label="⚡ " + i18n._("secureboot.recommended_actions"))
-    actions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    actions_box.set_margin_start(10)
-    actions_box.set_margin_end(10)
-    actions_box.set_margin_top(10)
-    actions_box.set_margin_bottom(10)
-
-    actions_frame.add(actions_box)
-    box.pack_start(actions_frame, True, True, 0)
-
-    # Bouton diagnostic
-    diagnose_btn = Gtk.Button(label="🔍 " + i18n._("secureboot.run_diagnosis"))
-    diagnose_btn.connect("clicked",
-        lambda w: run_diagnosis_wizard(
-            sb_manager, diagnosis_label, actions_box, main_window, i18n
-        )
-    )
-    box.pack_start(diagnose_btn, False, False, 0)
-
-    # Lancer automatiquement au chargement (avec vidage du cache pour obtenir l'état actuel)
-    GLib.idle_add(lambda: run_diagnosis_wizard(
-        sb_manager, diagnosis_label, actions_box, main_window, i18n, clear_cache=True
-    ))
-
-    return box
-
-
-def run_diagnosis_wizard(sb_manager, diagnosis_label, actions_box, main_window, i18n, clear_cache=True):
-    """Execute le diagnostic et affiche les actions recommandées"""
-
-    # Nettoyer les actions précédentes
-    for child in actions_box.get_children():
-        actions_box.remove(child)
-
-    diagnosis_label.set_markup("<i>" + i18n._("secureboot.analyzing") + "...</i>")
-
-    def do_diagnosis():
-        # Vider le cache MOK pour obtenir les données à jour (seulement si demandé)
-        if clear_cache:
-            sb_manager.clear_mok_cache()
-        diag = sb_manager.diagnose_secureboot_issue()
-
-        GLib.idle_add(lambda: display_diagnosis_results(
-            diag, diagnosis_label, actions_box, sb_manager, main_window, i18n
-        ))
-
-    # Lancer dans un thread
-    threading.Thread(target=do_diagnosis, daemon=True).start()
-
-
-def display_diagnosis_results(diag, diagnosis_label, actions_box, sb_manager, main_window, i18n):
-    """Affiche les résultats du diagnostic (VERSION AMÉLIORÉE)"""
-
-    # Afficher le message
-    if diag['issue_type'] == 'OK':
-        diagnosis_label.set_markup(f"<span color='green'><b>✅ {diag['message']}</b></span>")
-    elif diag['issue_type'] in ['NOT_UEFI', 'SB_DISABLED']:
-        diagnosis_label.set_markup(f"<span color='orange'><b>⚠️ {diag['message']}</b></span>")
-    elif diag['issue_type'] == 'KERNEL_SIGNATURE_ISSUES':
-        # Afficher les détails des problèmes de signature
-        details = diag.get('details', {})
-        kernels = details.get('kernels', [])
-
-        message_lines = ["<span color='red'><b>❌ Signature issues detected:</b></span>\n"]
-
-        for kernel_info in kernels:
-            kernel_ver = kernel_info['kernel_version']
-            message_lines.append(f"\n<b>Kernel {kernel_ver}:</b>")
-
-            for issue in kernel_info['issues']:
-                issue_type = issue['type']
-                issue_msg = issue['message']
-
-                if issue_type == 'MODULES_UNSIGNED':
-                    icon = "📦"
-                    message_lines.append(f"  {icon} Modules: {issue_msg}")
-                elif issue_type == 'INITRD_UNSIGNED_MODULES':
-                    icon = "💾"
-                    message_lines.append(f"  {icon} Initrd: {issue_msg}")
-                elif issue_type == 'VMLINUZ_UNSIGNED':
-                    icon = "🔧"
-                    message_lines.append(f"  {icon} vmlinuz: {issue_msg}")
-
-        diagnosis_label.set_markup('\n'.join(message_lines))
-    else:
-        diagnosis_label.set_markup(f"<span color='red'><b>❌ {diag['message']}</b></span>")
-
-    # Afficher les solutions avec boutons d'action
-    for i, solution in enumerate(diag['solutions'], 1):
-        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-
-        label = Gtk.Label(label=f"{i}. {solution}")
-        label.set_xalign(0)
-        label.set_line_wrap(True)
-        hbox.pack_start(label, True, True, 0)
-
-        # Boutons d'action selon le type de problème
-        if diag['issue_type'] == 'MOK_NOT_ENROLLED' and i == 1:
-            btn = Gtk.Button(label="▶️ " + i18n._("secureboot.start_enrollment"))
-            btn.connect("clicked", lambda w: start_mok_enrollment_wizard(
-                sb_manager, main_window, i18n
-            ))
-            hbox.pack_start(btn, False, False, 0)
-
-        elif diag['issue_type'] == 'MOK_PENDING' and i == 1:
-            # Pour l'état pending, proposer un bouton de reboot
-            btn = Gtk.Button(label="🔄 " + i18n._("button.reboot_now"))
-            btn.connect("clicked", lambda w: reboot_now(main_window, i18n))
-            hbox.pack_start(btn, False, False, 0)
-
-        elif diag['issue_type'] in ['MODULES_NOT_SIGNED', 'KERNEL_SIGNATURE_ISSUES'] and i == 1:
-            btn = Gtk.Button(label="▶️ " + i18n._("secureboot.start_signing"))
-            btn.connect("clicked", lambda w: start_module_signing_wizard(
-                sb_manager, main_window, i18n
-            ))
-            hbox.pack_start(btn, False, False, 0)
-
-        actions_box.pack_start(hbox, False, False, 0)
-
-    actions_box.show_all()
-
-
-def reboot_now(main_window, i18n):
-    """Lance un reboot immédiat avec confirmation"""
-    dialog = Gtk.MessageDialog(
-        transient_for=main_window,
-        flags=0,
-        message_type=Gtk.MessageType.WARNING,
-        buttons=Gtk.ButtonsType.YES_NO,
-        text="🔄 " + i18n._("button.reboot_now") + "?"
-    )
-    dialog.format_secondary_text(i18n._("secureboot.reboot_confirm_message"))
-
-    response = dialog.run()
-    dialog.destroy()
-
-    if response == Gtk.ResponseType.YES:
-        reboot_via_helper(main_window, i18n)
-
-
-def start_mok_enrollment_wizard(sb_manager, main_window, i18n):
-    """Lance le wizard d'enrollment MOK"""
-
-    dialog = Gtk.Dialog(
-        title="🔐 " + i18n._("secureboot.mok_enrollment"),
-        parent=main_window,
-        flags=Gtk.DialogFlags.MODAL
-    )
-    dialog.set_default_size(600, 500)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(20)
-    content.set_margin_end(20)
-    content.set_margin_top(20)
-    content.set_margin_bottom(20)
-
-    # Instructions
-    instructions = Gtk.Label()
-    instructions_text = f"""<b>📋 {i18n._("secureboot.enrollment_instructions")}</b>
+        box.append(markup_label(f"""<b>📋 {i18n._("secureboot.enrollment_instructions")}</b>
 
 {i18n._("secureboot.enrollment_explanation")}
 
@@ -307,1062 +203,498 @@ def start_mok_enrollment_wizard(sb_manager, main_window, i18n):
    • {i18n._("secureboot.enter_password")}
    • {i18n._("secureboot.select_reboot")}
 
-<b>4️⃣</b> {i18n._("secureboot.key_enrolled_success")}
-"""
-    instructions.set_markup(instructions_text)
-    instructions.set_line_wrap(True)
-    instructions.set_xalign(0)
-    content.pack_start(instructions, False, False, 0)
+<b>4️⃣</b> {i18n._("secureboot.key_enrolled_success")}"""))
 
-    # Champ mot de passe
-    pw_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-    pw_label = Gtk.Label(label=i18n._("secureboot.temp_password") + ":")
-    pw_entry = Gtk.Entry()
-    pw_entry.set_visibility(False)
-    pw_entry.set_placeholder_text("8-16 " + i18n._("secureboot.characters"))
-    pw_box.pack_start(pw_label, False, False, 0)
-    pw_box.pack_start(pw_entry, True, True, 0)
-    content.pack_start(pw_box, False, False, 0)
+        password = entry(placeholder="8-16 " + i18n._("secureboot.characters"), password=True)
+        confirm = entry(password=True)
+        box.append(labeled(i18n._("secureboot.temp_password") + " :", password))
+        box.append(labeled(i18n._("secureboot.confirm") + " :", confirm))
+        error_label = markup_label()
+        box.append(error_label)
 
-    # Confirmation
-    pw_confirm_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-    pw_confirm_label = Gtk.Label(label=i18n._("secureboot.confirm") + ":")
-    pw_confirm_entry = Gtk.Entry()
-    pw_confirm_entry.set_visibility(False)
-    pw_confirm_box.pack_start(pw_confirm_label, False, False, 0)
-    pw_confirm_box.pack_start(pw_confirm_entry, True, True, 0)
-    content.pack_start(pw_confirm_box, False, False, 0)
+        def on_import():
+            pw = password.get_text()
+            if pw != confirm.get_text():
+                error_label.set_markup(f"<span color='red'>{esc(i18n._('secureboot.passwords_dont_match'))}</span>")
+                return False
+            if not 8 <= len(pw) <= 16:
+                error_label.set_markup(f"<span color='red'>{esc(i18n._('secureboot.password_length_error'))}</span>")
+                return False
 
-    # Boutons
-    dialog.add_button("❌ " + i18n._("button.cancel"), Gtk.ResponseType.CANCEL)
-    enroll_btn = dialog.add_button("✅ " + i18n._("secureboot.import_mok_key"), Gtk.ResponseType.OK)
+            ok_button.set_sensitive(False)
+            error_label.set_markup(f"<i>{i18n._('secureboot.importing')}…</i>")
 
-    content.show_all()
+            def done(result):
+                dialog.close()
+                if result['success']:
+                    self.sb.clear_mok_cache()
+                    self.show_reboot_instructions()
+                    self.update_history()
+                else:
+                    self.dialogs.show_error(i18n._("message.error.title"), result['message'])
 
-    response = dialog.run()
+            # pkexec : thread (le mot de passe temporaire passe sur stdin du helper)
+            run_task(lambda: self.sb.enroll_mok_key(pw), done)
+            return False
 
-    if response == Gtk.ResponseType.OK:
-        password = pw_entry.get_text()
-        confirm = pw_confirm_entry.get_text()
+        dialog, ok_button = self.dialogs.window("🔐 " + i18n._("secureboot.mok_enrollment"), box,
+                                                "✅ " + i18n._("secureboot.import_mok_key"), on_import,
+                                                width=620, height=640)
+        password.grab_focus()
 
-        if password != confirm:
-            dialog.destroy()
-            show_error_dialog(main_window, i18n._("secureboot.passwords_dont_match"), i18n)
+    def show_reboot_instructions(self):
+        i18n = self.i18n
+        message = (f"{i18n._('secureboot.reboot_required')}\n\n"
+                   f"{i18n._('secureboot.follow_mok_manager_instructions')}\n\n"
+                   f"{i18n._('secureboot.reboot_now_question')}")
+        self.dialogs.ask("✅ " + i18n._("secureboot.mok_key_imported"), message, on_yes=self.reboot,
+                         yes_label="🔄 " + i18n._("button.reboot_now"), no_label="⏸️ " + i18n._("button.later"))
+
+    # ==================== Signature des kernels ====================
+
+    def module_signing_wizard(self):
+        run_task(self.sb.get_custom_kernels, self._show_signing_dialog)
+
+    def _show_signing_dialog(self, custom_kernels):
+        i18n = self.i18n
+        if not custom_kernels:
+            self.dialogs.show_warning(i18n._("secureboot.module_signing"), i18n._("secureboot.no_custom_kernels"))
             return
 
-        if len(password) < 8 or len(password) > 16:
-            dialog.destroy()
-            show_error_dialog(main_window, i18n._("secureboot.password_length_error"), i18n)
-            return
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                      margin_top=12, margin_bottom=18, margin_start=18, margin_end=18)
+        box.append(markup_label(f"<big><b>✍️ {i18n._('secureboot.resign_custom_kernels')}</b></big>"))
+        box.append(markup_label(f"<b>{len(custom_kernels)} {i18n._('secureboot.custom_kernels_detected')} :</b>"))
 
-        # Lancer l'enrollment
-        result = sb_manager.enroll_mok_key(password)
+        checks = []
+        kernel_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for kernel in custom_kernels:
+            check = Gtk.CheckButton(active=True, label=(
+                f"{kernel['kernel_version']} ({kernel['module_count']} {i18n._('secureboot.modules')})"))
+            checks.append((check, kernel['kernel_version']))
+            kernel_list.append(check)
+        box.append(kernel_list)
 
-        if result['success']:
-            dialog.destroy()
-            # Vider le cache MOK pour forcer une nouvelle lecture au prochain check
-            sb_manager.clear_mok_cache()
-            # Afficher dialogue de succès avec instructions pour le reboot
-            show_reboot_instructions_dialog(main_window, i18n)
-        else:
-            dialog.destroy()
-            show_error_dialog(main_window, result['message'], i18n)
-    else:
-        dialog.destroy()
+        vmlinuz_check = Gtk.CheckButton(label="✅ " + i18n._("secureboot.also_sign_vmlinuz"), active=True)
+        box.append(vmlinuz_check)
 
+        status_label = markup_label()
+        progress = Gtk.ProgressBar(show_text=True, visible=False)
+        box.append(status_label)
+        box.append(progress)
 
-def show_reboot_instructions_dialog(main_window, i18n):
-    """Affiche les instructions de reboot après enrollment"""
-    dialog = Gtk.MessageDialog(
-        transient_for=main_window,
-        flags=0,
-        message_type=Gtk.MessageType.INFO,
-        buttons=Gtk.ButtonsType.NONE,
-        text="✅ " + i18n._("secureboot.mok_key_imported")
-    )
+        def on_sign():
+            selected = [version for check, version in checks if check.get_active()]
+            if not selected:
+                status_label.set_markup(f"<span color='red'>{esc(i18n._('secureboot.no_kernel_selected'))}</span>")
+                return False
 
-    secondary_text = f"""{i18n._("secureboot.reboot_required")}
+            sign_vmlinuz = vmlinuz_check.get_active()
+            ok_button.set_sensitive(False)
+            for check, _version in checks:
+                check.set_sensitive(False)
+            vmlinuz_check.set_sensitive(False)
+            progress.set_visible(True)
+            dialog.set_can_close(False)
 
-{i18n._("secureboot.follow_mok_manager_instructions")}
-
-{i18n._("secureboot.reboot_now_question")}"""
-
-    dialog.format_secondary_text(secondary_text)
-
-    # Ajouter des boutons pour rebooter ou annuler
-    dialog.add_button("⏸️ " + i18n._("button.later"), Gtk.ResponseType.CANCEL)
-    dialog.add_button("🔄 " + i18n._("button.reboot_now"), Gtk.ResponseType.OK)
-
-    response = dialog.run()
-    dialog.destroy()
-
-    # Si l'utilisateur choisit de rebooter maintenant
-    if response == Gtk.ResponseType.OK:
-        reboot_via_helper(main_window, i18n)
-
-
-def start_module_signing_wizard(sb_manager, main_window, i18n):
-    """Lance le wizard de re-signature des modules"""
-
-    dialog = Gtk.Dialog(
-        title="✍️ " + i18n._("secureboot.module_signing"),
-        parent=main_window,
-        flags=Gtk.DialogFlags.MODAL
-    )
-    dialog.set_default_size(700, 600)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(20)
-    content.set_margin_end(20)
-    content.set_margin_top(20)
-    content.set_margin_bottom(20)
-
-    # Instructions
-    title_label = Gtk.Label()
-    title_label.set_markup("<big><b>✍️ " + i18n._("secureboot.resign_custom_kernels") + "</b></big>")
-    content.pack_start(title_label, False, False, 0)
-
-    # Détecter les kernels
-    custom_kernels = sb_manager.get_custom_kernels()
-
-    if not custom_kernels:
-        no_kernel_label = Gtk.Label()
-        no_kernel_label.set_markup("<span color='orange'>⚠️ " + i18n._("secureboot.no_custom_kernels") + "</span>")
-        content.pack_start(no_kernel_label, False, False, 0)
-        dialog.add_button("OK", Gtk.ResponseType.OK)
-        content.show_all()
-        dialog.run()
-        dialog.destroy()
-        return
-
-    # Liste des kernels avec checkboxes
-    info_label = Gtk.Label()
-    info_label.set_markup(f"<b>{len(custom_kernels)} " + i18n._("secureboot.custom_kernels_detected") + ":</b>")
-    info_label.set_xalign(0)
-    content.pack_start(info_label, False, False, 0)
-
-    # ScrolledWindow pour la liste
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_min_content_height(200)
-
-    kernel_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-    kernel_checkboxes = []
-
-    for kernel in custom_kernels:
-        checkbox = Gtk.CheckButton(
-            label=f"{kernel['kernel_version']} ({kernel['module_count']} " + i18n._("secureboot.modules") + ")"
-        )
-        checkbox.set_active(True)
-        checkbox.kernel_version = kernel['kernel_version']
-        kernel_checkboxes.append(checkbox)
-        kernel_list_box.pack_start(checkbox, False, False, 0)
-
-    scrolled.add(kernel_list_box)
-    content.pack_start(scrolled, True, True, 0)
-
-    # Checkbox pour signer vmlinuz aussi
-    sign_vmlinuz_checkbox = Gtk.CheckButton(
-        label="✅ " + i18n._("secureboot.also_sign_vmlinuz")
-    )
-    sign_vmlinuz_checkbox.set_active(True)
-    content.pack_start(sign_vmlinuz_checkbox, False, False, 0)
-
-    # Label de statut (au centre, AVANT la progressbar)
-    status_label = Gtk.Label()
-    status_label.set_line_wrap(True)
-    status_label.set_xalign(0)
-    status_label.set_margin_top(10)
-    status_label.set_margin_bottom(10)
-    content.pack_start(status_label, False, False, 0)
-
-    # Barre de progression
-    progress = Gtk.ProgressBar()
-    progress.set_show_text(True)
-    content.pack_start(progress, False, False, 0)
-
-    # Boutons
-    dialog.add_button("❌ " + i18n._("button.cancel"), Gtk.ResponseType.CANCEL)
-    sign_btn = dialog.add_button("✍️ " + i18n._("secureboot.sign_modules"), Gtk.ResponseType.OK)
-
-    content.show_all()
-    progress.hide()
-    status_label.hide()
-
-    response = dialog.run()
-
-    if response == Gtk.ResponseType.OK:
-        # Récupérer les kernels sélectionnés
-        selected_kernels = [
-            cb.kernel_version for cb in kernel_checkboxes if cb.get_active()
-        ]
-
-        if not selected_kernels:
-            dialog.destroy()
-            show_error_dialog(main_window, i18n._("secureboot.no_kernel_selected"), i18n)
-            return
-
-        sign_vmlinuz = sign_vmlinuz_checkbox.get_active()
-
-        # Désactiver les boutons et afficher la barre de progression
-        sign_btn.set_sensitive(False)
-        progress.show()
-        status_label.show()
-
-        # Signer dans un thread
-        def do_signing():
-            total_modules_signed = 0
-            total_modules_failed = 0
-            total_vmlinuz_signed = 0
-            total_vmlinuz_failed = 0
-
-            # Avec sign_kernel_complete, une seule tâche par kernel (modules + vmlinuz en une fois)
-            total_tasks = len(selected_kernels)
-            current_task = 0
-
-            for kernel_ver in selected_kernels:
-                # Signer modules ET vmlinuz dans une seule session pkexec (évite double mot de passe)
-                def update_progress(current, total, module_name):
-                    fraction = (current_task + (current / total)) / total_tasks if total > 0 else 1.0
-                    text = f"[{current_task + 1}/{total_tasks}] {kernel_ver}: {current}/{total}"
-                    GLib.idle_add(progress.set_fraction, fraction)
-                    GLib.idle_add(progress.set_text, text)
-                    # Afficher le module/étape en cours dans le status_label
-                    if module_name:
+            def work():
+                totals = {"modules_signed": 0, "modules_failed": 0, "vmlinuz_signed": 0,
+                          "vmlinuz_failed": 0, "errors": []}
+                for task, kernel_ver in enumerate(selected):
+                    def update(current, total, module_name, task=task, kernel_ver=kernel_ver):
+                        fraction = (task + (current / total)) / len(selected) if total else 1.0
+                        text = f"[{task + 1}/{len(selected)}] {kernel_ver} : {current}/{total}"
                         if module_name == "vmlinuz":
-                            GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_vmlinuz_for") + f" {kernel_ver}...")
+                            status = f"🔄 {i18n._('secureboot.signing_vmlinuz_for')} {kernel_ver}…"
                         elif module_name == "initrd":
-                            GLib.idle_add(status_label.set_text, f"🔄 Regenerating initrd for {kernel_ver}...\n⚙️ This is required for SecureBoot to work")
+                            status = f"🔄 {i18n._('secureboot.regenerating_initrd', version=kernel_ver)}"
+                        elif module_name:
+                            status = f"🔄 {i18n._('secureboot.signing_modules_for')} {kernel_ver}…\n📦 {module_name}"
                         else:
-                            GLib.idle_add(status_label.set_text, f"🔄 " + i18n._("secureboot.signing_modules_for") + f" {kernel_ver}...\n📦 {module_name}")
+                            status = None
+                        GLib.idle_add(lambda: (progress.set_fraction(fraction), progress.set_text(text),
+                                               status and status_label.set_text(status), False)[-1])
 
-                print(f"[DEBUG GUI] Calling sign_kernel_complete for {kernel_ver} (sign_vmlinuz={sign_vmlinuz})")
-                result = sb_manager.sign_kernel_complete(
-                    kernel_ver,
-                    sign_vmlinuz_flag=sign_vmlinuz,
-                    progress_callback=update_progress
-                )
-                print(f"[DEBUG GUI] result = {result}")
+                    logging.info(f"Signature de {kernel_ver} (vmlinuz={sign_vmlinuz})")
+                    result = self.sb.sign_kernel_complete(kernel_ver, sign_vmlinuz_flag=sign_vmlinuz,
+                                                          progress_callback=update)
+                    logging.info(f"Résultat {kernel_ver} : {result}")
 
-                total_modules_signed += result['modules_signed']
-                total_modules_failed += result['modules_failed']
-                if result['vmlinuz_signed']:
-                    total_vmlinuz_signed += 1
-                elif sign_vmlinuz:
-                    total_vmlinuz_failed += 1
+                    totals["modules_signed"] += result['modules_signed']
+                    totals["modules_failed"] += result['modules_failed']
+                    if result['vmlinuz_signed']:
+                        totals["vmlinuz_signed"] += 1
+                    elif sign_vmlinuz:
+                        totals["vmlinuz_failed"] += 1
+                    if not result['success']:
+                        totals["errors"].append(f"{kernel_ver} : {result['message']}")
+                return totals
 
-                current_task += 1
+            def done(totals):
+                dialog.force_close()
+                self.show_signing_results(totals)
+                self.update_history()
 
-            # Afficher résultat final
-            print(f"[DEBUG GUI] Final results:")
-            print(f"  modules_signed: {total_modules_signed}")
-            print(f"  modules_failed: {total_modules_failed}")
-            print(f"  vmlinuz_signed: {total_vmlinuz_signed}")
-            print(f"  vmlinuz_failed: {total_vmlinuz_failed}")
+            def failed(error):
+                dialog.force_close()
+                self.dialogs.show_error(i18n._("message.error.title"), str(error))
 
-            GLib.idle_add(lambda: show_signing_results(
-                main_window, total_modules_signed, total_modules_failed,
-                total_vmlinuz_signed, total_vmlinuz_failed, i18n
-            ))
-            GLib.idle_add(dialog.destroy)
+            run_task(work, done, failed)
+            return False
 
-        threading.Thread(target=do_signing, daemon=True).start()
-    else:
-        dialog.destroy()
+        dialog, ok_button = self.dialogs.window("✍️ " + i18n._("secureboot.module_signing"), box,
+                                                "✍️ " + i18n._("secureboot.sign_modules"), on_sign,
+                                                width=680, height=560)
 
-
-def show_signing_results(main_window, modules_signed, modules_failed, vmlinuz_signed, vmlinuz_failed, i18n):
-    """Affiche les résultats de la signature"""
-    dialog = Gtk.MessageDialog(
-        transient_for=main_window,
-        flags=0,
-        message_type=Gtk.MessageType.INFO if modules_failed == 0 and vmlinuz_failed == 0 else Gtk.MessageType.WARNING,
-        buttons=Gtk.ButtonsType.OK,
-        text="📊 " + i18n._("secureboot.signing_results")
-    )
-
-    secondary_text = f"""{i18n._("secureboot.modules_signed")}: {modules_signed}
-{i18n._("secureboot.modules_failed")}: {modules_failed}
-{i18n._("secureboot.vmlinuz_signed")}: {vmlinuz_signed}
-{i18n._("secureboot.vmlinuz_failed")}: {vmlinuz_failed}
-
-"""
-
-    if modules_failed == 0 and vmlinuz_failed == 0:
-        secondary_text += "✅ " + i18n._("secureboot.all_signed_successfully")
-        secondary_text += "\n\n" + i18n._("secureboot.next_steps_update_grub")
-    else:
-        secondary_text += "⚠️ " + i18n._("secureboot.some_signing_failed")
-
-    dialog.format_secondary_text(secondary_text)
-    dialog.run()
-    dialog.destroy()
-
-
-# ==================== Onglet 1: Statut SecureBoot ====================
-
-def create_status_tab(main_window, sb_manager, i18n):
-    """Crée l'onglet de vérification du statut"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    box.set_margin_start(10)
-    box.set_margin_end(10)
-    box.set_margin_top(10)
-    box.set_margin_bottom(10)
-
-    # === Section: Statut actuel ===
-    status_frame = Gtk.Frame(label=i18n._("secureboot.current_status"))
-    status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    status_box.set_margin_start(10)
-    status_box.set_margin_end(10)
-    status_box.set_margin_top(10)
-    status_box.set_margin_bottom(10)
-
-    # Label de statut
-    status_label = Gtk.Label()
-    status_label.set_line_wrap(True)
-    status_label.set_xalign(0)
-    update_status_display(sb_manager, status_label, i18n)
-    status_box.pack_start(status_label, False, False, 0)
-
-    # Bouton rafraîchir
-    refresh_btn = Gtk.Button(label=i18n._("button.refresh"))
-    refresh_btn.connect("clicked", lambda w: update_status_display(sb_manager, status_label, i18n))
-    status_box.pack_start(refresh_btn, False, False, 0)
-
-    status_frame.add(status_box)
-    box.pack_start(status_frame, False, False, 0)
-
-    # === Section: Dépendances ===
-    deps_frame = Gtk.Frame(label=i18n._("secureboot.dependencies"))
-    deps_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-    deps_box.set_margin_start(10)
-    deps_box.set_margin_end(10)
-    deps_box.set_margin_top(10)
-    deps_box.set_margin_bottom(10)
-
-    deps_label = Gtk.Label()
-    deps_label.set_line_wrap(True)
-    deps_label.set_xalign(0)
-    update_dependencies_display(sb_manager, deps_label, i18n)
-    deps_box.pack_start(deps_label, False, False, 0)
-
-    # Bouton installer dépendances
-    install_deps_btn = Gtk.Button(label=i18n._("secureboot.install_dependencies"))
-    install_deps_btn.connect("clicked", lambda w: install_dependencies(main_window, sb_manager, deps_label, i18n))
-    deps_box.pack_start(install_deps_btn, False, False, 0)
-
-    deps_frame.add(deps_box)
-    box.pack_start(deps_frame, False, False, 0)
-
-    # === Section: Instructions ===
-    info_frame = Gtk.Frame(label=i18n._("secureboot.instructions"))
-    info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-    info_box.set_margin_start(10)
-    info_box.set_margin_end(10)
-    info_box.set_margin_top(10)
-    info_box.set_margin_bottom(10)
-
-    instructions_text = i18n._("secureboot.instructions_text")
-    instructions_label = Gtk.Label(label=instructions_text)
-    instructions_label.set_line_wrap(True)
-    instructions_label.set_xalign(0)
-    info_box.pack_start(instructions_label, False, False, 0)
-
-    info_frame.add(info_box)
-    box.pack_start(info_frame, True, True, 0)
-
-    return box
-
-
-def update_status_display(sb_manager, label, i18n):
-    """Met à jour l'affichage du statut"""
-    info = sb_manager.get_system_info()
-
-    text = []
-
-    # UEFI
-    if info['is_uefi']:
-        text.append(f"✅ <b>{i18n._('secureboot.uefi_mode')}:</b> {i18n._('secureboot.enabled')}")
-    else:
-        text.append(f"❌ <b>{i18n._('secureboot.uefi_mode')}:</b> {i18n._('secureboot.disabled')} - {i18n._('secureboot.legacy_boot')}")
-        label.set_markup('\n'.join(text))
-        return
-
-    # SecureBoot status
-    sb_status = info['secureboot_status']
-    if sb_status['enabled']:
-        text.append(f"🛡️ <b>SecureBoot:</b> <span color='green'>{i18n._('secureboot.enabled')}</span>")
-    else:
-        text.append(f"🔓 <b>SecureBoot:</b> <span color='orange'>{i18n._('secureboot.disabled')}</span>")
-
-    text.append(f"   <i>{sb_status['details']}</i>")
-
-    # Setup mode
-    if info['setup_mode']:
-        text.append(f"⚙️ <b>{i18n._('secureboot.setup_mode')}:</b> <span color='orange'>{i18n._('secureboot.active')}</span>")
-
-    label.set_markup('\n'.join(text))
-
-
-def update_dependencies_display(sb_manager, label, i18n):
-    """Met à jour l'affichage des dépendances"""
-    deps = sb_manager.check_dependencies()
-
-    text = []
-    for name, installed in deps['dependencies'].items():
-        if installed:
-            text.append(f"✅ <b>{name}:</b> {i18n._('secureboot.installed')}")
+    def show_signing_results(self, totals):
+        i18n = self.i18n
+        text = (f"{i18n._('secureboot.modules_signed')}: {totals['modules_signed']}\n"
+                f"{i18n._('secureboot.modules_failed')}: {totals['modules_failed']}\n"
+                f"{i18n._('secureboot.vmlinuz_signed')}: {totals['vmlinuz_signed']}\n"
+                f"{i18n._('secureboot.vmlinuz_failed')}: {totals['vmlinuz_failed']}\n\n")
+        if totals['modules_failed'] == 0 and totals['vmlinuz_failed'] == 0 and not totals['errors']:
+            text += "✅ " + i18n._("secureboot.all_signed_successfully")
+            text += "\n\n" + i18n._("secureboot.next_steps_update_grub")
         else:
-            text.append(f"❌ <b>{name}:</b> <span color='red'>{i18n._('secureboot.not_installed')}</span>")
+            text += "⚠️ " + i18n._("secureboot.some_signing_failed")
+            if totals['errors']:
+                text += "\n\n" + "\n".join(totals['errors'])
+        self.dialogs.show_info("📊 " + i18n._("secureboot.signing_results"), text)
 
-    label.set_markup('\n'.join(text))
+    # ==================== Statut ====================
+
+    def _build_status(self):
+        i18n = self.i18n
+        box = page_box()
+
+        status, inner = section(i18n._("secureboot.current_status"))
+        self.status_label = markup_label()
+        inner.append(self.status_label)
+        inner.append(button_row(button(i18n._("button.refresh"), self.update_status)))
+        box.append(status)
+
+        deps, inner = section(i18n._("secureboot.dependencies"))
+        self.deps_label = markup_label()
+        inner.append(self.deps_label)
+        inner.append(button_row(button(i18n._("secureboot.install_dependencies"), self.install_dependencies)))
+        box.append(deps)
+
+        info, inner = section(i18n._("secureboot.instructions"))
+        label = markup_label()
+        label.set_text(i18n._("secureboot.instructions_text"))
+        inner.append(label)
+        box.append(info)
+
+        self.update_status()
+        self.update_dependencies()
+        return Gtk.ScrolledWindow(child=box, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+
+    def update_status(self):
+        i18n = self.i18n
+        info = self.sb.get_system_info()
+        lines = []
+        if not info['is_uefi']:
+            lines.append(f"❌ <b>{i18n._('secureboot.uefi_mode')}:</b> {i18n._('secureboot.disabled')} - "
+                         f"{i18n._('secureboot.legacy_boot')}")
+            self.status_label.set_markup('\n'.join(lines))
+            return
+
+        lines.append(f"✅ <b>{i18n._('secureboot.uefi_mode')}:</b> {i18n._('secureboot.enabled')}")
+        sb_status = info['secureboot_status']
+        if sb_status['enabled']:
+            lines.append(f"🛡️ <b>SecureBoot:</b> <span color='green'>{i18n._('secureboot.enabled')}</span>")
+        else:
+            lines.append(f"🔓 <b>SecureBoot:</b> <span color='orange'>{i18n._('secureboot.disabled')}</span>")
+        lines.append(f"   <i>{esc(sb_status['details'])}</i>")
+        if info['setup_mode']:
+            lines.append(f"⚙️ <b>{i18n._('secureboot.setup_mode')}:</b> "
+                         f"<span color='orange'>{i18n._('secureboot.active')}</span>")
+        self.status_label.set_markup('\n'.join(lines))
+
+    def update_dependencies(self):
+        i18n = self.i18n
+        lines = []
+        for name, installed in self.sb.check_dependencies()['dependencies'].items():
+            if installed:
+                lines.append(f"✅ <b>{name}:</b> {i18n._('secureboot.installed')}")
+            else:
+                lines.append(f"❌ <b>{name}:</b> <span color='red'>{i18n._('secureboot.not_installed')}</span>")
+        self.deps_label.set_markup('\n'.join(lines))
+
+    def install_dependencies(self):
+        i18n = self.i18n
+        deps = self.sb.check_dependencies()
+        if deps['all_installed']:
+            self.dialogs.show_info(i18n._("message.info.title"), i18n._("secureboot.all_dependencies_installed"))
+            return
+
+        def work():
+            missing = deps['dependencies']
+            packages = []
+            if not missing['mokutil']:
+                packages.append(('mokutil', i18n._('secureboot.dep.mokutil')))
+            if not missing['openssl']:
+                packages.append(('openssl', i18n._('secureboot.dep.openssl')))
+            if not missing['sbsign'] or not missing['sbverify']:
+                packages.append(('sbsigntool', i18n._('secureboot.dep.sbsigntool')))
+            if not missing['sign-file']:
+                kbuild = find_available_kbuild_package()  # apt-cache : thread
+                packages.append((kbuild, i18n._('secureboot.dep.sign_file')))
+            if not missing['modinfo']:
+                packages.append(('kmod', i18n._('secureboot.dep.kmod')))
+            return packages
+
+        def confirm(packages):
+            if not packages:
+                self.dialogs.show_info(i18n._("message.info.title"), i18n._("secureboot.all_dependencies_installed"))
+                return
+            names = [name for name, _ in packages]
+            details = f"{i18n._('secureboot.packages')}:\n" + "\n".join(f"  • {n} ({d})" for n, d in packages)
+            self.dialogs.ask(i18n._("secureboot.install_dependencies_confirm"), details,
+                             on_yes=lambda: self._apt_install(names))
+
+        run_task(work, confirm)
+
+    def _apt_install(self, names):
+        i18n = self.i18n
+        progress = self.dialogs.progress(i18n._("secureboot.install_dependencies"), ", ".join(names))
+        progress.pulse()
+
+        def done(result):
+            progress.close()
+            success, _, error = result
+            self.update_dependencies()
+            if success:
+                self.dialogs.toast(i18n._("message.success.operation"))
+            else:
+                self.dialogs.show_error(i18n._("message.error.title"), error or i18n._("message.error.operation"))
+
+        def failed(error):
+            progress.close()
+            self.dialogs.show_error(i18n._("message.error.title"), str(error))
+
+        run_task(lambda: PkexecHelper.apt_install(*names), done, failed)
+
+    # ==================== Clés MOK ====================
+
+    def _build_keys(self):
+        i18n = self.i18n
+        box = page_box()
+
+        enrolled, inner = section(i18n._("secureboot.enrolled_keys"))
+        enrolled.set_vexpand(True)
+        scrolled, self.enrolled_view = monospace_view()
+        scrolled.set_min_content_height(160)
+        inner.append(scrolled)
+        inner.append(button_row(button(i18n._("button.refresh"), lambda: self.update_enrolled_keys(True))))
+        box.append(enrolled)
+
+        manage, inner = section(i18n._("secureboot.manage_keys"))
+        import_entry = entry(placeholder=i18n._("secureboot.key_file_path"))
+        row = labeled(i18n._("secureboot.import_key") + " :", import_entry)
+        row.append(button("📁", lambda: self.browse(import_entry, "secureboot.select_key_file",
+                                                    i18n._("secureboot.key_files"), KEY_FILTERS_PATTERNS)))
+        row.append(button(i18n._("secureboot.import"), lambda: self.import_mok_key(import_entry)))
+        inner.append(row)
+        inner.append(button_row(button(i18n._("secureboot.reset_keys"), self.reset_mok_keys,
+                                       "destructive-action")))
+        inner.append(markup_label(f"<span color='orange'>⚠️ {i18n._('secureboot.keys_warning')}</span>"))
+        box.append(manage)
+        return box
+
+    def update_enrolled_keys(self, clear_cache=False):
+        i18n = self.i18n
+        buffer = self.enrolled_view.get_buffer()
+        buffer.set_text(i18n._("secureboot.analyzing") + "…")
+
+        def work():
+            if clear_cache:
+                self.sb.clear_mok_cache()
+            return self.sb.list_enrolled_keys()
+
+        def done(result):
+            if result['success']:
+                if result['keys']:
+                    text = f"{i18n._('secureboot.enrolled_keys_count')}: {len(result['keys'])}\n\n"
+                    text += result['raw_output']
+                else:
+                    text = i18n._("secureboot.no_enrolled_keys")
+            else:
+                text = f"{i18n._('message.error.title')}: {result.get('error', 'Unknown error')}"
+            buffer.set_text(text)
+
+        run_task(work, done)
+
+    def browse(self, target_entry, title_key, filter_name, patterns):
+        i18n = self.i18n
+        filters = [(filter_name, patterns), (i18n._("secureboot.all_files"), ["*"])]
+        self.dialogs.open_file(i18n._(title_key), target_entry.set_text, filters,
+                               initial_folder=self.sb.keys_dir if self.sb.keys_dir.is_dir() else None)
+
+    def import_mok_key(self, import_entry):
+        i18n = self.i18n
+        key_file = import_entry.get_text().strip()
+        if not key_file:
+            self.dialogs.show_error(i18n._("message.error.title"), i18n._("secureboot.no_key_file"))
+            return
+        # mokutil demande un mot de passe temporaire : import dans un terminal
+        self.dialogs.ask(i18n._("secureboot.import_key_confirm"), i18n._("secureboot.import_key_details"),
+                         on_yes=lambda: self.run_in_terminal(PkexecHelper.terminal_command("mokutil-import", key_file)))
+
+    def reset_mok_keys(self):
+        i18n = self.i18n
+        self.dialogs.ask(i18n._("secureboot.reset_keys_confirm"), i18n._("secureboot.reset_keys_warning"),
+                         destructive=True,
+                         on_yes=lambda: self.run_in_terminal(PkexecHelper.terminal_command("mokutil-reset")))
+
+    def run_in_terminal(self, command):
+        if launch_in_terminal(command) is None:
+            self.dialogs.show_error(self.i18n._("message.error.title"), self.i18n._("secureboot.no_terminal"))
+
+    # ==================== Signature manuelle ====================
+
+    def _build_signing(self):
+        i18n = self.i18n
+        box = page_box()
+
+        generate, inner = section(i18n._("secureboot.generate_key"))
+        key_name = entry(text="MOK", placeholder="MOK")
+        common_name = entry(placeholder="Kernel Module Signing Key")
+        inner.append(labeled(i18n._("secureboot.key_name") + " :", key_name))
+        inner.append(labeled(i18n._("secureboot.common_name") + " :", common_name))
+        result_label = markup_label(selectable=True)
+        inner.append(button_row(button(i18n._("secureboot.generate"),
+                                       lambda: self.generate_key(key_name, common_name, result_label),
+                                       "suggested-action")))
+        inner.append(result_label)
+        box.append(generate)
+
+        sign, inner = section(i18n._("secureboot.sign_module"))
+        module_entry = entry(placeholder="/path/to/module.ko")
+        priv_entry = entry(placeholder="/path/to/key.priv")
+        cert_entry = entry(placeholder="/path/to/cert.der")
+        for label_key, field, title_key, filter_name, patterns in (
+                ("secureboot.module_file", module_entry, "secureboot.select_module_file",
+                 i18n._("secureboot.kernel_modules"), ["*.ko"]),
+                ("secureboot.private_key", priv_entry, "secureboot.select_key_file",
+                 i18n._("secureboot.key_files"), KEY_FILTERS_PATTERNS),
+                ("secureboot.certificate", cert_entry, "secureboot.select_key_file",
+                 i18n._("secureboot.key_files"), KEY_FILTERS_PATTERNS)):
+            row = labeled(i18n._(label_key) + " :", field)
+            row.append(button("📁", lambda f=field, t=title_key, n=filter_name, p=patterns: self.browse(f, t, n, p)))
+            inner.append(row)
+        sign_result = markup_label(selectable=True)
+        inner.append(button_row(button(i18n._("secureboot.sign"),
+                                       lambda: self.sign_module(module_entry, priv_entry, cert_entry, sign_result),
+                                       "suggested-action")))
+        inner.append(sign_result)
+        box.append(sign)
+
+        return Gtk.ScrolledWindow(child=box, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+
+    def generate_key(self, name_entry, cn_entry, result_label):
+        i18n = self.i18n
+        key_name = name_entry.get_text().strip() or "MOK"
+        common_name = cn_entry.get_text().strip() or None
+
+        def done(result):
+            if result['success']:
+                result_label.set_markup(
+                    f"✅ {i18n._('secureboot.key_generated')}\n\n"
+                    f"🔑 {i18n._('secureboot.private_key')}: {esc(str(result['priv_key']))}\n"
+                    f"📜 {i18n._('secureboot.certificate')}: {esc(str(result['der_cert']))}\n"
+                    f"📄 PEM: {esc(str(result['pem_cert']))}")
+                self.update_history()
+            else:
+                result_label.set_markup(f"❌ {i18n._('message.error.title')}: {esc(str(result['error']))}")
+
+        run_task(lambda: self.sb.generate_signing_key(key_name, common_name), done)
+
+    def sign_module(self, module_entry, priv_entry, cert_entry, result_label):
+        i18n = self.i18n
+        paths = [e.get_text().strip() for e in (module_entry, priv_entry, cert_entry)]
+        if not all(paths):
+            result_label.set_markup(f"❌ {i18n._('secureboot.fill_all_fields')}")
+            return
+
+        def done(result):
+            if result['success']:
+                result_label.set_markup(f"✅ {esc(result['message'])}")
+                self.update_history()
+            else:
+                result_label.set_markup(f"❌ {i18n._('message.error.title')}: {esc(str(result['error']))}")
+
+        run_task(lambda: self.sb.sign_kernel_module(*paths), done)
+
+    # ==================== Historique ====================
+
+    def _build_history(self):
+        i18n = self.i18n
+        box = page_box()
+        box.append(button_row(
+            button(i18n._("button.refresh"), self.update_history),
+            button(i18n._("button.clear"), self.clear_history, "destructive-action"),
+        ))
+        scrolled, self.history_view = monospace_view()
+        box.append(scrolled)
+        return box
+
+    def update_history(self):
+        i18n = self.i18n
+        history = self.sb.get_history()
+        buffer = self.history_view.get_buffer()
+        if not history:
+            buffer.set_text(i18n._("secureboot.no_history"))
+            return
+
+        text = f"{i18n._('secureboot.history_count')}: {len(history)}\n\n"
+        for item in history:
+            timestamp = datetime.fromisoformat(item['timestamp']).strftime("%Y-%m-%d %H:%M:%S")
+            text += f"{'✅' if item['success'] else '❌'} [{timestamp}] {item['action']}\n"
+            if isinstance(item['details'], dict):
+                for key, value in item['details'].items():
+                    text += f"   {key}: {value}\n"
+            else:
+                text += f"   {item['details']}\n"
+            text += "\n"
+        buffer.set_text(text)
+
+    def clear_history(self):
+        def do_clear():
+            self.sb._save_history([])
+            self.update_history()
+        self.dialogs.ask(self.i18n._("message.confirm.title"), self.i18n._("secureboot.clear_history_confirm"),
+                         on_yes=do_clear, destructive=True)
 
 
 def find_available_kbuild_package():
-    """Trouve le package linux-kbuild disponible pour le kernel actuel"""
-    import os
-    import subprocess
-    import re
-
+    """Paquet linux-kbuild (contient sign-file) disponible pour le kernel en cours"""
     kernel_version = os.uname().release
-    # Extraire la version complète (ex: 6.12.31 depuis 6.12.31-kernelcustom)
-    version_match = re.match(r'(\d+\.\d+\.\d+)', kernel_version)
-    if not version_match:
-        # Fallback sur major.minor
-        kernel_major_minor = '.'.join(kernel_version.split('.')[:2])
-        return f'linux-kbuild-{kernel_major_minor}'
+    match = re.match(r'(\d+\.\d+)(\.\d+)?', kernel_version)
+    if not match:
+        return f'linux-headers-{kernel_version}'
 
-    full_version = version_match.group(1)  # Ex: 6.12.31
-    kernel_major_minor = '.'.join(full_version.split('.')[:2])  # Ex: 6.12
-
-    # Liste des candidats par ordre de préférence
-    candidates = [
-        f'linux-kbuild-{full_version}',  # Exact: linux-kbuild-6.12.31
-        f'linux-kbuild-{kernel_major_minor}',  # Général: linux-kbuild-6.12
-    ]
-
-    # Chercher les packages disponibles avec apt-cache
+    major_minor = match.group(1)
+    candidates = [f'linux-kbuild-{match.group(0)}', f'linux-kbuild-{major_minor}']
     try:
-        result = subprocess.run(
-            ['apt-cache', 'search', f'^linux-kbuild-{kernel_major_minor}'],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-
-        if result.returncode == 0 and result.stdout.strip():
-            # Extraire les noms de packages
-            available_packages = []
-            for line in result.stdout.strip().split('\n'):
-                pkg_match = re.match(r'^(linux-kbuild-[\d\.\+a-z]+)', line)
-                if pkg_match:
-                    available_packages.append(pkg_match.group(1))
-
-            # Chercher d'abord la version exacte
-            for candidate in candidates:
-                if candidate in available_packages:
-                    return candidate
-
-            # Si pas de version exacte, prendre le plus récent disponible
-            if available_packages:
-                # Trier par version (le plus récent en dernier)
-                available_packages.sort()
-                return available_packages[-1]
-    except Exception as e:
-        print(f"[DEBUG] Erreur lors de la recherche de linux-kbuild: {e}")
-
-    # Fallback: essayer avec les headers du kernel actuel
-    headers_package = f'linux-headers-{kernel_version}'
-    return headers_package
-
-
-def install_dependencies(main_window, sb_manager, deps_label, i18n):
-    """Installe les dépendances manquantes"""
-    import os
-
-    deps = sb_manager.check_dependencies()
-
-    if deps['all_installed']:
-        show_info_dialog(main_window, i18n._("secureboot.all_dependencies_installed"), i18n)
-        return
-
-    # Mapper les outils vers les paquets Debian
-    packages = []
-    package_descriptions = []
-
-    if not deps['dependencies']['mokutil']:
-        packages.append('mokutil')
-        package_descriptions.append('mokutil (gestion des clés MOK)')
-
-    if not deps['dependencies']['openssl']:
-        packages.append('openssl')
-        package_descriptions.append('openssl (génération de clés)')
-
-    # sbsign et sbverify sont dans le package sbsigntool
-    if not deps['dependencies']['sbsign'] or not deps['dependencies']['sbverify']:
-        if 'sbsigntool' not in packages:
-            packages.append('sbsigntool')
-            package_descriptions.append('sbsigntool (signature UEFI)')
-
-    # sign-file est dans linux-kbuild-X.Y.Z (détection intelligente)
-    if not deps['dependencies']['sign-file']:
-        kbuild_package = find_available_kbuild_package()
-        packages.append(kbuild_package)
-        package_descriptions.append(f'{kbuild_package} (signature de modules)')
-
-    # modinfo est dans kmod (normalement déjà installé)
-    if not deps['dependencies']['modinfo']:
-        if 'kmod' not in packages:
-            packages.append('kmod')
-            package_descriptions.append('kmod (outils pour modules kernel)')
-
-    if not packages:
-        show_info_dialog(main_window, i18n._("secureboot.all_dependencies_installed"), i18n)
-        return
-
-
-    # Demander confirmation
-    dialog = Gtk.MessageDialog(
-        transient_for=main_window,
-        flags=0,
-        message_type=Gtk.MessageType.QUESTION,
-        buttons=Gtk.ButtonsType.YES_NO,
-        text=i18n._("secureboot.install_dependencies_confirm")
-    )
-    dialog.format_secondary_text(f"{i18n._('secureboot.packages')}:\n" + '\n'.join(f"  • {desc}" for desc in package_descriptions))
-
-    response = dialog.run()
-    dialog.destroy()
-
-    if response == Gtk.ResponseType.YES:
-        run_helper_action(main_window, lambda: PkexecHelper.apt_install(*packages), i18n,
-                          lambda success: update_dependencies_display(sb_manager, deps_label, i18n))
-
-
-# ==================== Onglet 2: Gestion des clés ====================
-
-def create_keys_tab(main_window, sb_manager, i18n):
-    """Crée l'onglet de gestion des clés MOK"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    box.set_margin_start(10)
-    box.set_margin_end(10)
-    box.set_margin_top(10)
-    box.set_margin_bottom(10)
-
-    # === Section: Clés enrollées ===
-    enrolled_frame = Gtk.Frame(label=i18n._("secureboot.enrolled_keys"))
-    enrolled_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    enrolled_box.set_margin_start(10)
-    enrolled_box.set_margin_end(10)
-    enrolled_box.set_margin_top(10)
-    enrolled_box.set_margin_bottom(10)
-
-    # ScrolledWindow pour la liste des clés
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_min_content_height(150)
-    scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-
-    enrolled_textview = Gtk.TextView()
-    enrolled_textview.set_editable(False)
-    enrolled_textview.set_wrap_mode(Gtk.WrapMode.WORD)
-    enrolled_textview.modify_font(Pango.FontDescription("monospace 9"))
-    scrolled.add(enrolled_textview)
-    enrolled_box.pack_start(scrolled, True, True, 0)
-
-    # Boutons
-    btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    refresh_enrolled_btn = Gtk.Button(label=i18n._("button.refresh"))
-    refresh_enrolled_btn.connect("clicked", lambda w: update_enrolled_keys(sb_manager, enrolled_textview, i18n))
-    btn_box.pack_start(refresh_enrolled_btn, True, True, 0)
-    enrolled_box.pack_start(btn_box, False, False, 0)
-
-    enrolled_frame.add(enrolled_box)
-    box.pack_start(enrolled_frame, True, True, 0)
-
-    # === Section: Gestion des clés ===
-    manage_frame = Gtk.Frame(label=i18n._("secureboot.manage_keys"))
-    manage_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    manage_box.set_margin_start(10)
-    manage_box.set_margin_end(10)
-    manage_box.set_margin_top(10)
-    manage_box.set_margin_bottom(10)
-
-    # Importer une clé
-    import_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    import_label = Gtk.Label(label=i18n._("secureboot.import_key") + ":")
-    import_box.pack_start(import_label, False, False, 0)
-
-    import_entry = Gtk.Entry()
-    import_entry.set_placeholder_text(i18n._("secureboot.key_file_path"))
-    import_box.pack_start(import_entry, True, True, 0)
-
-    browse_btn = Gtk.Button(label="📁")
-    browse_btn.connect("clicked", lambda w: browse_file(main_window, import_entry, i18n))
-    import_box.pack_start(browse_btn, False, False, 0)
-
-    import_btn = Gtk.Button(label=i18n._("secureboot.import"))
-    import_btn.connect("clicked", lambda w: import_mok_key(main_window, sb_manager, import_entry, i18n))
-    import_box.pack_start(import_btn, False, False, 0)
-
-    manage_box.pack_start(import_box, False, False, 0)
-
-    # Réinitialiser les clés
-    reset_btn = Gtk.Button(label=i18n._("secureboot.reset_keys"))
-    reset_btn.connect("clicked", lambda w: reset_mok_keys(main_window, sb_manager, i18n))
-    manage_box.pack_start(reset_btn, False, False, 0)
-
-    # Avertissement
-    warning_label = Gtk.Label()
-    warning_label.set_markup(f"<span color='orange'>⚠️ {i18n._('secureboot.keys_warning')}</span>")
-    warning_label.set_line_wrap(True)
-    warning_label.set_xalign(0)
-    manage_box.pack_start(warning_label, False, False, 0)
-
-    manage_frame.add(manage_box)
-    box.pack_start(manage_frame, False, False, 0)
-
-    # Charger les clés au démarrage
-    GLib.idle_add(lambda: update_enrolled_keys(sb_manager, enrolled_textview, i18n))
-
-    return box
-
-
-def update_enrolled_keys(sb_manager, textview, i18n):
-    """Met à jour la liste des clés enrollées"""
-    result = sb_manager.list_enrolled_keys()
-
-    buffer = textview.get_buffer()
-
-    if result['success']:
-        if result['keys']:
-            text = f"{i18n._('secureboot.enrolled_keys_count')}: {len(result['keys'])}\n\n"
-            text += result['raw_output']
-        else:
-            text = i18n._("secureboot.no_enrolled_keys")
-    else:
-        text = f"{i18n._('message.error.title')}: {result.get('error', 'Unknown error')}"
-
-    buffer.set_text(text)
-
-
-def browse_file(main_window, entry, i18n):
-    """Ouvre un dialogue de sélection de fichier"""
-    dialog = Gtk.FileChooserDialog(
-        title=i18n._("secureboot.select_key_file"),
-        parent=main_window,
-        action=Gtk.FileChooserAction.OPEN
-    )
-    dialog.add_buttons(
-        i18n._("button.cancel"), Gtk.ResponseType.CANCEL,
-        i18n._("button.select"), Gtk.ResponseType.OK
-    )
-
-    # Filtre pour les fichiers de clés
-    filter_keys = Gtk.FileFilter()
-    filter_keys.set_name(i18n._("secureboot.key_files"))
-    filter_keys.add_pattern("*.der")
-    filter_keys.add_pattern("*.cer")
-    filter_keys.add_pattern("*.crt")
-    filter_keys.add_pattern("*.pem")
-    dialog.add_filter(filter_keys)
-
-    filter_all = Gtk.FileFilter()
-    filter_all.set_name(i18n._("secureboot.all_files"))
-    filter_all.add_pattern("*")
-    dialog.add_filter(filter_all)
-
-    response = dialog.run()
-    if response == Gtk.ResponseType.OK:
-        entry.set_text(dialog.get_filename())
-
-    dialog.destroy()
-
-
-def import_mok_key(main_window, sb_manager, entry, i18n):
-    """Importe une clé MOK"""
-    key_file = entry.get_text().strip()
-
-    if not key_file:
-        show_error_dialog(main_window, i18n._("secureboot.no_key_file"), i18n)
-        return
-
-    # Demander confirmation
-    dialog = Gtk.MessageDialog(
-        transient_for=main_window,
-        flags=0,
-        message_type=Gtk.MessageType.WARNING,
-        buttons=Gtk.ButtonsType.YES_NO,
-        text=i18n._("secureboot.import_key_confirm")
-    )
-    dialog.format_secondary_text(i18n._("secureboot.import_key_details"))
-
-    response = dialog.run()
-    dialog.destroy()
-
-    if response == Gtk.ResponseType.YES:
-        # Exécuter l'import dans un terminal (mokutil demande un mot de passe temporaire)
-        run_terminal_command(main_window, PkexecHelper.terminal_command("mokutil-import", key_file), i18n)
-
-
-def reset_mok_keys(main_window, sb_manager, i18n):
-    """Réinitialise toutes les clés MOK"""
-    dialog = Gtk.MessageDialog(
-        transient_for=main_window,
-        flags=0,
-        message_type=Gtk.MessageType.WARNING,
-        buttons=Gtk.ButtonsType.YES_NO,
-        text=i18n._("secureboot.reset_keys_confirm")
-    )
-    dialog.format_secondary_text(i18n._("secureboot.reset_keys_warning"))
-
-    response = dialog.run()
-    dialog.destroy()
-
-    if response == Gtk.ResponseType.YES:
-        run_terminal_command(main_window, PkexecHelper.terminal_command("mokutil-reset"), i18n)
-
-
-# ==================== Onglet 3: Signature de modules ====================
-
-def create_signing_tab(main_window, sb_manager, i18n):
-    """Crée l'onglet de signature de modules"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    box.set_margin_start(10)
-    box.set_margin_end(10)
-    box.set_margin_top(10)
-    box.set_margin_bottom(10)
-
-    # === Section: Générer une clé ===
-    generate_frame = Gtk.Frame(label=i18n._("secureboot.generate_key"))
-    generate_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    generate_box.set_margin_start(10)
-    generate_box.set_margin_end(10)
-    generate_box.set_margin_top(10)
-    generate_box.set_margin_bottom(10)
-
-    # Nom de la clé
-    name_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    name_label = Gtk.Label(label=i18n._("secureboot.key_name") + ":")
-    name_box.pack_start(name_label, False, False, 0)
-
-    key_name_entry = Gtk.Entry()
-    key_name_entry.set_text("MOK")
-    key_name_entry.set_placeholder_text("MOK")
-    name_box.pack_start(key_name_entry, True, True, 0)
-    generate_box.pack_start(name_box, False, False, 0)
-
-    # Common Name
-    cn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    cn_label = Gtk.Label(label=i18n._("secureboot.common_name") + ":")
-    cn_box.pack_start(cn_label, False, False, 0)
-
-    cn_entry = Gtk.Entry()
-    cn_entry.set_placeholder_text("Kernel Module Signing Key")
-    cn_box.pack_start(cn_entry, True, True, 0)
-    generate_box.pack_start(cn_box, False, False, 0)
-
-    # Bouton générer
-    generate_btn = Gtk.Button(label=i18n._("secureboot.generate"))
-    generate_btn.connect("clicked", lambda w: generate_key(main_window, sb_manager, key_name_entry, cn_entry, result_label, i18n))
-    generate_box.pack_start(generate_btn, False, False, 0)
-
-    # Label de résultat
-    result_label = Gtk.Label()
-    result_label.set_line_wrap(True)
-    result_label.set_xalign(0)
-    generate_box.pack_start(result_label, False, False, 0)
-
-    generate_frame.add(generate_box)
-    box.pack_start(generate_frame, False, False, 0)
-
-    # === Section: Signer un module ===
-    sign_frame = Gtk.Frame(label=i18n._("secureboot.sign_module"))
-    sign_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    sign_box.set_margin_start(10)
-    sign_box.set_margin_end(10)
-    sign_box.set_margin_top(10)
-    sign_box.set_margin_bottom(10)
-
-    # Module à signer
-    module_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    module_label = Gtk.Label(label=i18n._("secureboot.module_file") + ":")
-    module_box.pack_start(module_label, False, False, 0)
-
-    module_entry = Gtk.Entry()
-    module_entry.set_placeholder_text("/path/to/module.ko")
-    module_box.pack_start(module_entry, True, True, 0)
-
-    browse_module_btn = Gtk.Button(label="📁")
-    browse_module_btn.connect("clicked", lambda w: browse_module_file(main_window, module_entry, i18n))
-    module_box.pack_start(browse_module_btn, False, False, 0)
-    sign_box.pack_start(module_box, False, False, 0)
-
-    # Clé privée
-    priv_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    priv_label = Gtk.Label(label=i18n._("secureboot.private_key") + ":")
-    priv_box.pack_start(priv_label, False, False, 0)
-
-    priv_entry = Gtk.Entry()
-    priv_entry.set_placeholder_text("/path/to/key.priv")
-    priv_box.pack_start(priv_entry, True, True, 0)
-
-    browse_priv_btn = Gtk.Button(label="📁")
-    browse_priv_btn.connect("clicked", lambda w: browse_file(main_window, priv_entry, i18n))
-    priv_box.pack_start(browse_priv_btn, False, False, 0)
-    sign_box.pack_start(priv_box, False, False, 0)
-
-    # Certificat
-    cert_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    cert_label = Gtk.Label(label=i18n._("secureboot.certificate") + ":")
-    cert_box.pack_start(cert_label, False, False, 0)
-
-    cert_entry = Gtk.Entry()
-    cert_entry.set_placeholder_text("/path/to/cert.der")
-    cert_box.pack_start(cert_entry, True, True, 0)
-
-    browse_cert_btn = Gtk.Button(label="📁")
-    browse_cert_btn.connect("clicked", lambda w: browse_file(main_window, cert_entry, i18n))
-    cert_box.pack_start(browse_cert_btn, False, False, 0)
-    sign_box.pack_start(cert_box, False, False, 0)
-
-    # Bouton signer
-    sign_btn = Gtk.Button(label=i18n._("secureboot.sign"))
-    sign_btn.connect("clicked", lambda w: sign_module(main_window, sb_manager, module_entry, priv_entry, cert_entry, sign_result_label, i18n))
-    sign_box.pack_start(sign_btn, False, False, 0)
-
-    # Label de résultat
-    sign_result_label = Gtk.Label()
-    sign_result_label.set_line_wrap(True)
-    sign_result_label.set_xalign(0)
-    sign_box.pack_start(sign_result_label, False, False, 0)
-
-    sign_frame.add(sign_box)
-    box.pack_start(sign_frame, True, True, 0)
-
-    return box
-
-
-def browse_module_file(main_window, entry, i18n):
-    """Ouvre un dialogue de sélection de module kernel"""
-    dialog = Gtk.FileChooserDialog(
-        title=i18n._("secureboot.select_module_file"),
-        parent=main_window,
-        action=Gtk.FileChooserAction.OPEN
-    )
-    dialog.add_buttons(
-        i18n._("button.cancel"), Gtk.ResponseType.CANCEL,
-        i18n._("button.select"), Gtk.ResponseType.OK
-    )
-
-    # Filtre pour les modules
-    filter_modules = Gtk.FileFilter()
-    filter_modules.set_name(i18n._("secureboot.kernel_modules"))
-    filter_modules.add_pattern("*.ko")
-    dialog.add_filter(filter_modules)
-
-    filter_all = Gtk.FileFilter()
-    filter_all.set_name(i18n._("secureboot.all_files"))
-    filter_all.add_pattern("*")
-    dialog.add_filter(filter_all)
-
-    response = dialog.run()
-    if response == Gtk.ResponseType.OK:
-        entry.set_text(dialog.get_filename())
-
-    dialog.destroy()
-
-
-def generate_key(main_window, sb_manager, name_entry, cn_entry, result_label, i18n):
-    """Génère une paire de clés"""
-    key_name = name_entry.get_text().strip()
-    common_name = cn_entry.get_text().strip()
-
-    if not key_name:
-        key_name = "MOK"
-
-    def do_generate():
-        result = sb_manager.generate_signing_key(key_name, common_name if common_name else None)
-
-        def update_ui():
-            if result['success']:
-                text = f"✅ {i18n._('secureboot.key_generated')}\n\n"
-                text += f"🔑 {i18n._('secureboot.private_key')}: {result['priv_key']}\n"
-                text += f"📜 {i18n._('secureboot.certificate')}: {result['der_cert']}\n"
-                text += f"📄 PEM: {result['pem_cert']}"
-                result_label.set_markup(text)
-            else:
-                result_label.set_markup(f"❌ {i18n._('message.error.title')}: {result['error']}")
-
-        GLib.idle_add(update_ui)
-
-    thread = threading.Thread(target=do_generate)
-    thread.daemon = True
-    thread.start()
-
-
-def sign_module(main_window, sb_manager, module_entry, priv_entry, cert_entry, result_label, i18n):
-    """Signe un module kernel"""
-    module_path = module_entry.get_text().strip()
-    priv_path = priv_entry.get_text().strip()
-    cert_path = cert_entry.get_text().strip()
-
-    if not all([module_path, priv_path, cert_path]):
-        result_label.set_markup(f"❌ {i18n._('secureboot.fill_all_fields')}")
-        return
-
-    def do_sign():
-        result = sb_manager.sign_kernel_module(module_path, priv_path, cert_path)
-
-        def update_ui():
-            if result['success']:
-                result_label.set_markup(f"✅ {result['message']}")
-            else:
-                result_label.set_markup(f"❌ {i18n._('message.error.title')}: {result['error']}")
-
-        GLib.idle_add(update_ui)
-
-    thread = threading.Thread(target=do_sign)
-    thread.daemon = True
-    thread.start()
-
-
-# ==================== Onglet 4: Historique ====================
-
-def create_history_tab(sb_manager, i18n):
-    """Crée l'onglet d'historique"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    box.set_margin_start(10)
-    box.set_margin_end(10)
-    box.set_margin_top(10)
-    box.set_margin_bottom(10)
-
-    # Barre de boutons
-    btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-
-    refresh_btn = Gtk.Button(label=i18n._("button.refresh"))
-    clear_btn = Gtk.Button(label=i18n._("button.clear"))
-
-    btn_box.pack_start(refresh_btn, False, False, 0)
-    btn_box.pack_start(clear_btn, False, False, 0)
-    box.pack_start(btn_box, False, False, 0)
-
-    # ScrolledWindow pour l'historique
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-
-    history_textview = Gtk.TextView()
-    history_textview.set_editable(False)
-    history_textview.set_wrap_mode(Gtk.WrapMode.WORD)
-    history_textview.modify_font(Pango.FontDescription("monospace 9"))
-    scrolled.add(history_textview)
-    box.pack_start(scrolled, True, True, 0)
-
-    # Connexions
-    refresh_btn.connect("clicked", lambda w: update_history_display(sb_manager, history_textview, i18n))
-    clear_btn.connect("clicked", lambda w: clear_history(sb_manager, history_textview, i18n))
-
-    # Charger l'historique au démarrage
-    GLib.idle_add(lambda: update_history_display(sb_manager, history_textview, i18n))
-
-    return box
-
-
-def update_history_display(sb_manager, textview, i18n):
-    """Met à jour l'affichage de l'historique"""
-    history = sb_manager.get_history()
-
-    buffer = textview.get_buffer()
-
-    if not history:
-        buffer.set_text(i18n._("secureboot.no_history"))
-        return
-
-    text = f"{i18n._('secureboot.history_count')}: {len(history)}\n\n"
-
-    for entry in history:
-        timestamp = datetime.fromisoformat(entry['timestamp']).strftime("%Y-%m-%d %H:%M:%S")
-        success_icon = "✅" if entry['success'] else "❌"
-
-        text += f"{success_icon} [{timestamp}] {entry['action']}\n"
-
-        if isinstance(entry['details'], dict):
-            for key, value in entry['details'].items():
-                text += f"   {key}: {value}\n"
-        else:
-            text += f"   {entry['details']}\n"
-
-        text += "\n"
-
-    buffer.set_text(text)
-
-
-def clear_history(sb_manager, textview, i18n):
-    """Efface l'historique"""
-    sb_manager._save_history([])
-    update_history_display(sb_manager, textview, i18n)
-
-
-# ==================== Utilitaires ====================
-
-def show_error_dialog(parent, message, i18n):
-    """Affiche un dialogue d'erreur"""
-    dialog = Gtk.MessageDialog(
-        transient_for=parent,
-        flags=0,
-        message_type=Gtk.MessageType.ERROR,
-        buttons=Gtk.ButtonsType.OK,
-        text=i18n._("message.error.title")
-    )
-    dialog.format_secondary_text(message)
-    dialog.run()
-    dialog.destroy()
-
-
-def show_info_dialog(parent, message, i18n):
-    """Affiche un dialogue d'information"""
-    dialog = Gtk.MessageDialog(
-        transient_for=parent,
-        flags=0,
-        message_type=Gtk.MessageType.INFO,
-        buttons=Gtk.ButtonsType.OK,
-        text=i18n._("message.success.title") if hasattr(i18n._("message.success"), 'title') else "Information"
-    )
-    dialog.format_secondary_text(message)
-    dialog.run()
-    dialog.destroy()
-
-
-def reboot_via_helper(parent, i18n):
-    """Redémarre via le helper privilégié"""
-    success, _, error = PkexecHelper.reboot()
-    if not success:
-        show_error_dialog(parent, f"Failed to reboot: {error}", i18n)
-
-
-def run_helper_action(parent, action, i18n, callback=None):
-    """
-    Exécute une action du helper dans un thread puis affiche le résultat.
-    action: fonction sans argument retournant (success, stdout, error)
-    """
-    def do_run():
-        try:
-            success, _, error = action()
-        except Exception as e:
-            success, error = False, str(e)
-
-        def update_ui():
-            if callback:
-                callback(success)
-            if success:
-                show_info_dialog(parent, i18n._("message.success.operation"), i18n)
-            else:
-                show_error_dialog(parent, error or i18n._("message.error.operation"), i18n)
-        GLib.idle_add(update_ui)
-
-    threading.Thread(target=do_run, daemon=True).start()
-
-
-def run_terminal_command(parent, command, i18n):
-    """Lance une commande (liste d'arguments) dans un émulateur de terminal"""
-    if launch_in_terminal(command) is None:
-        show_error_dialog(parent, i18n._("secureboot.no_terminal"), i18n)
+        result = subprocess.run(['apt-cache', 'search', '--names-only', f'^linux-kbuild-{major_minor}'],
+                                capture_output=True, text=True, check=False)
+        available = sorted(m.group(1) for line in result.stdout.splitlines()
+                           if (m := re.match(r'^(linux-kbuild-[\d.+a-z]+)', line)))
+        for candidate in candidates:
+            if candidate in available:
+                return candidate
+        if available:
+            return available[-1]
+    except OSError as e:
+        logging.debug(f"Recherche de linux-kbuild : {e}")
+
+    # Repli : les headers du kernel en cours contiennent aussi scripts/sign-file
+    return f'linux-headers-{kernel_version}'
+
+
+def create_secureboot_tab(main_window):
+    """Crée l'onglet de gestion SecureBoot"""
+    page = SecureBootPage(main_window)
+    main_window.secureboot_page = page
+    return page.build()

@@ -2,7 +2,7 @@
 
 [![Version](https://img.shields.io/badge/version-2.3-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
-[![GTK](https://img.shields.io/badge/GTK-3.0-orange.svg)](https://www.gtk.org/)
+[![GTK](https://img.shields.io/badge/GTK-4%20%2B%20libadwaita-orange.svg)](https://www.gtk.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-red.svg)](LICENSE)
 [![Language](https://img.shields.io/badge/language-FR%20%7C%20EN-yellow.svg)](translations/)
 
@@ -66,7 +66,7 @@
 ```bash
 # Debian
 sudo apt update
-sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-notify-0.7
+sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
 
 # Outils de compilation (pour kernels)
 sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
@@ -168,7 +168,7 @@ KernelCustomManager/
 │   ├── kernel_manager.py           # Gestion des kernels
 │   ├── driver_manager.py           # Gestion des drivers GPU (v2.2)
 │   └── secureboot_manager.py       # Gestion SecureBoot (v2.3)
-├── gui/                            # Interface graphique GTK3
+├── gui/                            # Interface graphique GTK4 + libadwaita
 │   ├── main_window.py              # Fenêtre principale
 │   ├── kernels_tab.py              # Onglet kernels installés
 │   ├── packages_tab.py             # Onglet paquets locaux
@@ -339,7 +339,7 @@ Nous cherchons des testeurs avec :
 | Compilation Kernel | ✅ Intégré | ❌ | ❌ | ❌ |
 | Gestion SecureBoot | ✅ Automatique | ❌ | ❌ | ❌ |
 | Signature modules | ✅ Intégré | ❌ | ❌ | ❌ |
-| Interface | ✅ GTK3 moderne | 🖥️ CLI | ✅ GTK basique | ✅ Qt |
+| Interface | ✅ GTK4 + libadwaita | 🖥️ CLI | ✅ GTK basique | ✅ Qt |
 
 ---
 
@@ -460,7 +460,7 @@ Avec l'aide de **Claude AI** (Anthropic) pour :
 ## 🌟 Remerciements
 
 - La communauté Linux pour les outils open source
-- Les mainteneurs de GTK3 et Python GObject
+- Les mainteneurs de GTK, libadwaita et Python GObject
 - NVIDIA, AMD, et Intel pour la documentation des drivers
 - Tous les contributeurs et testeurs
 

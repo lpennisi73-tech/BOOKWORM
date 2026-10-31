@@ -1,1056 +1,476 @@
 """
-Onglet de gestion des drivers GPU (NVIDIA, AMD et Intel)
-Version Avancée avec historique, rollback, web scraping dynamique et support Wayland
+Onglet de gestion des pilotes GPU (NVIDIA, AMD et Intel)
+Dépôts Debian, pilote officiel NVIDIA (.run), historique et rollback
 """
 
-import gi
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
-import threading
-from pathlib import Path
 from datetime import datetime
+
+from gi.repository import GLib, Gtk
+
+from core.driver_manager import DriverManager
+from gui.widgets import (Row, SimpleList, button, button_row, info_bar, inner_tabs, markup_label,
+                         page_box, section, title_label)
+from utils.dialogs import run_task
 from utils.i18n import get_i18n
 from utils.pkexec_helper import PkexecHelper
-from core.driver_manager import DriverManager
+
+VENDORS = ('NVIDIA', 'AMD', 'Intel')
+
+
+class DriversPage:
+    """État et widgets de l'onglet Pilotes"""
+
+    def __init__(self, main_window):
+        self.win = main_window
+        self.dialogs = main_window.dialogs
+        self.i18n = get_i18n()
+        self.manager = DriverManager()
+        self.gpu = None            # dict de detect_gpu() ou None
+        self.official = None       # informations du dernier pilote NVIDIA trouvé
+
+    @property
+    def vendor(self):
+        if self.gpu and self.gpu.get('vendor') in VENDORS:
+            return self.gpu['vendor']
+        return None
+
+    # ==================== Construction ====================
+
+    def build(self):
+        i18n = self.i18n
+        manager = self.manager
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.info = info_bar(
+            f"<b>💿 {i18n._('drivers.distribution')}:</b> "
+            f"{GLib.markup_escape_text(manager.distro_info['name'])} {manager.distro_info['version']}",
+            f"<b>{'🪟' if manager.display_server == 'Wayland' else '🖼️'} "
+            f"{i18n._('drivers.display_server')}:</b> {manager.display_server}",
+        )
+        root.append(self.info)
+
+        tabs, _stack = inner_tabs([
+            ("install", i18n._("drivers.tab_installation"), self._build_install()),
+            ("history", i18n._("drivers.tab_history"), self._build_history()),
+            ("rollback", i18n._("drivers.tab_rollback"), self._build_rollback()),
+        ])
+        root.append(tabs)
+
+        self.refresh_gpu(with_repos=True)
+        self.refresh_history()
+        self.refresh_backups()
+        return root
+
+    def _build_install(self):
+        i18n = self.i18n
+        box = page_box()
+
+        # --- État actuel ---
+        current, inner = section(i18n._("drivers.current_state"))
+        self.gpu_label = markup_label(f"<i>{i18n._('secureboot.analyzing')}…</i>")
+        self.driver_label = markup_label()
+        inner.append(self.gpu_label)
+        inner.append(self.driver_label)
+        inner.append(button_row(
+            button(i18n._("button.refresh"), lambda: self.refresh_gpu(with_repos=True)),
+            button(i18n._("drivers.create_backup"), self.create_backup),
+            button(i18n._("drivers.remove_driver"), self.remove_driver, "destructive-action"),
+        ))
+        box.append(current)
+
+        # --- Dépôts Debian ---
+        repos, inner = section(i18n._("drivers.from_repos"))
+        repos.set_vexpand(True)
+        self.repos = SimpleList([i18n._("drivers.column_name"), i18n._("drivers.column_version"),
+                                 i18n._("drivers.column_description")], expand=[2], min_height=140)
+        inner.append(self.repos)
+        inner.append(button_row(button(i18n._("drivers.install_from_repos"), self.install_from_repos,
+                                       "suggested-action")))
+        box.append(repos)
+
+        # --- Site officiel (NVIDIA) ---
+        official, inner = section(i18n._("drivers.from_official_dynamic"))
+        inner.append(markup_label(f"<span color='orange'><b>{i18n._('drivers.warning_advanced')}</b></span>"))
+        self.official_label = markup_label()
+        inner.append(self.official_label)
+        inner.append(button_row(
+            button(i18n._("drivers.scrape_latest"), self.scrape_official),
+            button(i18n._("drivers.download_and_install"), self.install_official),
+        ))
+        box.append(official)
+
+        return Gtk.ScrolledWindow(child=box, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+
+    def _build_history(self):
+        i18n = self.i18n
+        box = page_box()
+        box.append(title_label(i18n._("drivers.history_title"), i18n._("drivers.history_subtitle")))
+        self.history = SimpleList([
+            i18n._("drivers.column_date"), i18n._("drivers.column_action"), i18n._("drivers.column_vendor"),
+            i18n._("drivers.column_driver"), i18n._("drivers.column_version"), i18n._("drivers.column_source"),
+            i18n._("drivers.column_status"), i18n._("drivers.column_distro"),
+        ], expand=[3, 7])
+        box.append(self.history)
+        box.append(button_row(button(i18n._("button.refresh"), self.refresh_history)))
+        return box
+
+    def _build_rollback(self):
+        i18n = self.i18n
+        box = page_box()
+        box.append(title_label(i18n._("drivers.rollback_title"), i18n._("drivers.rollback_subtitle")))
+        self.backups = SimpleList([
+            i18n._("drivers.column_backup_id"), i18n._("drivers.column_date"), i18n._("drivers.column_vendor"),
+            i18n._("drivers.column_driver"), i18n._("drivers.column_version"), i18n._("drivers.column_distro"),
+        ], expand=[0, 3])
+        box.append(self.backups)
+        box.append(button_row(
+            button(i18n._("button.refresh"), self.refresh_backups),
+            button(i18n._("drivers.restore_backup"), self.restore_backup, "destructive-action"),
+        ))
+        return box
+
+    # ==================== Rafraîchissement ====================
+
+    def refresh_gpu(self, with_repos=False):
+        """Détection du GPU, du pilote actuel et (option) des pilotes des dépôts, dans un thread"""
+        i18n = self.i18n
+        manager = self.manager
+
+        def work():
+            gpu = manager.detect_gpu()
+            vendor = gpu.get('vendor') if gpu else None
+            data = {"gpu": gpu, "driver": None, "repos": None, "nonfree": True}
+            if vendor:
+                data["driver"] = manager.get_current_driver(vendor)
+                if with_repos and vendor in VENDORS:
+                    data["repos"] = manager.get_available_drivers_from_repos(vendor)
+                    if vendor == 'NVIDIA':
+                        data["nonfree"] = manager.is_nonfree_enabled()
+            return data
+
+        def apply(data):
+            self.gpu = data["gpu"]
+            if not self.gpu:
+                self.gpu_label.set_markup(f"<span color='red'>{i18n._('drivers.no_gpu_detected')}</span>")
+                self.driver_label.set_text("")
+                return
+
+            esc = GLib.markup_escape_text
+            self.gpu_label.set_markup(
+                f"<b>{i18n._('drivers.detected_gpu')}</b> {esc(self.gpu['vendor'])} "
+                f"{esc(self.gpu['model'])} ({esc(self.gpu['pci_id'])})")
+
+            driver = data["driver"]
+            if driver:
+                text = (f"<b>{i18n._('drivers.current_driver')}</b> {esc(driver['name'])} - "
+                        f"{esc(driver['version'])} ({i18n._('drivers.source_' + driver['source'])})")
+            else:
+                text = f"<b>{i18n._('drivers.current_driver')}</b> {i18n._('drivers.no_driver')}"
+            if not data["nonfree"]:
+                text += f"\n<span color='orange'>⚠ {i18n._('drivers.nonfree_required')}</span>"
+            self.driver_label.set_markup(text)
+
+            if data["repos"] is not None:
+                rows = []
+                for drv in data["repos"]:
+                    name = drv['name'] + (" ⭐" if drv['recommended'] else "")
+                    rows.append(Row([name, drv['version'], drv['description']], data=drv['name']))
+                self.repos.set_rows(rows)
+
+        run_task(work, apply, lambda e: self.dialogs.show_error(i18n._("message.error.title"), str(e)))
+
+    def refresh_history(self):
+        i18n = self.i18n
+        rows = []
+        for entry in reversed(self.manager.get_history()):  # plus récent en premier
+            rows.append([
+                datetime.fromisoformat(entry['timestamp']).strftime('%Y-%m-%d %H:%M'),
+                i18n._(f"drivers.action_{entry['action']}"),
+                entry['vendor'],
+                entry['driver_name'],
+                entry['driver_version'],
+                i18n._(f"drivers.source_{entry['source']}"),
+                "✅" if entry['success'] else "❌",
+                entry.get('distro', 'Unknown'),
+            ])
+        self.history.set_rows(rows)
+
+    def refresh_backups(self):
+        rows = []
+        for backup in self.manager.list_backups():
+            driver = backup['driver']
+            rows.append([
+                backup['backup_id'],
+                datetime.fromisoformat(backup['timestamp']).strftime('%Y-%m-%d %H:%M'),
+                backup['vendor'],
+                driver.get('name', 'Unknown'),
+                driver.get('version', 'Unknown'),
+                f"{backup['distro']['id']} {backup['distro']['version']}",
+            ])
+        self.backups.set_rows(rows)
+
+    # ==================== Utilitaires ====================
+
+    def _require_vendor(self):
+        if self.vendor is None:
+            self.dialogs.show_error(self.i18n._("message.error.title"), self.i18n._("drivers.detect_gpu_first"))
+            return False
+        return True
+
+    def _with_progress(self, title, work, on_done, pulse=False):
+        """
+        Lance work(update_progress) dans un thread avec un dialogue de progression.
+        update_progress(message, fraction) est le callback attendu par DriverManager.
+        """
+        progress = self.dialogs.progress(title, self.i18n._("drivers.preparing"))
+        if pulse:
+            progress.pulse()
+
+        def update_progress(message, fraction=None):
+            progress.set_status(message)
+            if fraction is not None and not pulse:
+                progress.set_fraction(fraction)
+
+        def done(result):
+            progress.close()
+            on_done(result)
+
+        def failed(error):
+            progress.close()
+            self.dialogs.show_error(self.i18n._("message.error.title"), str(error))
+
+        run_task(lambda: work(update_progress), done, failed)
+
+    def _ask_backup_then(self, question_key, continuation):
+        """Propose une sauvegarde du pilote actuel, puis appelle continuation()"""
+        i18n = self.i18n
+        vendor = self.vendor
+
+        def backup():
+            def done(result):
+                success, _backup_id, message = result
+                self.refresh_backups()
+                if success:
+                    continuation()
+                else:
+                    self.dialogs.ask(i18n._("drivers.backup_failed"),
+                                     f"{message}\n\n{i18n._('drivers.continue_anyway')}",
+                                     on_yes=continuation)
+
+            self._with_progress(i18n._("drivers.creating_backup"),
+                                lambda update: self.manager.create_driver_backup(vendor, progress_callback=update),
+                                done)
+
+        self.dialogs.ask(i18n._("drivers.create_backup_before"), i18n._(question_key),
+                         on_yes=backup, on_no=continuation)
+
+    def _ask_reboot(self, message):
+        i18n = self.i18n
+
+        def reboot():
+            run_task(PkexecHelper.reboot, lambda r: r[0] or self.dialogs.show_error(
+                i18n._("message.error.title"), r[2]))
+
+        self.dialogs.ask(i18n._("drivers.success_title"), message, on_yes=reboot,
+                         yes_label=i18n._("button.reboot_now"), no_label=i18n._("button.later"))
+
+    # ==================== Actions ====================
+
+    def create_backup(self):
+        i18n = self.i18n
+        if not self._require_vendor():
+            return
+        vendor = self.vendor
+
+        def done(result):
+            success, _backup_id, message = result
+            self.refresh_backups()
+            if success:
+                self.dialogs.show_info(i18n._("drivers.success_title"),
+                                       f"{message}\n\n{i18n._('drivers.backup_saved')}")
+            else:
+                self.dialogs.show_error(i18n._("message.error.title"), message)
+
+        self._with_progress(i18n._("drivers.creating_backup"),
+                            lambda update: self.manager.create_driver_backup(vendor, progress_callback=update),
+                            done)
+
+    def install_from_repos(self):
+        i18n = self.i18n
+        row = self.repos.selected()
+        if row is None:
+            self.dialogs.show_error(i18n._("message.error.title"), i18n._("drivers.error_select_driver"))
+            return
+        if not self._require_vendor():
+            return
+        package_name = row.data
+        vendor = self.vendor
+
+        def install():
+            def done(result):
+                success, message = result
+                self.manager.add_to_history(
+                    action='install', vendor=vendor, driver_name=package_name,
+                    driver_version='repository', source='repository', success=success,
+                    details=None if success else {'error': message})
+                self.refresh_history()
+                if success:
+                    self.refresh_gpu(with_repos=True)
+                    self._ask_reboot(message + "\n\n" + i18n._("drivers.reboot_now"))
+                else:
+                    self.dialogs.show_error(i18n._("message.error.title"), message)
+
+            self._with_progress(i18n._("drivers.installing"),
+                                lambda update: self.manager.install_from_repos(package_name,
+                                                                               progress_callback=update),
+                                done)
+
+        def confirm():
+            self.dialogs.ask(i18n._("drivers.confirm_install_title"),
+                             i18n._("drivers.confirm_install_repos", driver=package_name) + "\n\n" +
+                             i18n._("drivers.reboot_required"),
+                             on_yes=install)
+
+        self._ask_backup_then("drivers.backup_recommended", confirm)
+
+    def scrape_official(self):
+        i18n = self.i18n
+        if self.vendor != 'NVIDIA':
+            # AMD et Intel : pilotes libres fournis par les dépôts Debian uniquement
+            self.official_label.set_markup(f"<span color='red'>{i18n._('drivers.scraping_not_supported')}</span>")
+            return
+
+        def done(info):
+            self.official = info
+            if not info:
+                self.official_label.set_markup(f"<span color='red'>{i18n._('drivers.error_fetch_info')}</span>")
+                return
+            esc = GLib.markup_escape_text
+            text = (f"<b>{i18n._('drivers.latest_official')}</b> {esc(info['version'])}\n"
+                    f"{i18n._('drivers.size')}: {esc(str(info['size']))}\n"
+                    f"{i18n._('drivers.date')}: {esc(str(info['date']))}")
+            if 'note' in info:
+                text += f"\n<i>{esc(info['note'])}</i>"
+            self.official_label.set_markup(text)
+
+        self._with_progress(i18n._("drivers.scraping_title"),
+                            lambda update: self.manager.scrape_nvidia_latest_version(progress_callback=update),
+                            done, pulse=True)
+
+    def install_official(self):
+        i18n = self.i18n
+        if not self.official:
+            self.dialogs.show_error(i18n._("message.error.title"), i18n._("drivers.scrape_first"))
+            return
+        if self.vendor != 'NVIDIA':
+            self.dialogs.show_error(i18n._("message.error.title"), i18n._("drivers.detect_gpu_first"))
+            return
+
+        info = self.official
+        manager = self.manager
+        needs_reboot = manager.display_server in ('X11', 'Wayland')  # installation au démarrage
+
+        warning = (i18n._("drivers.warning_official_install") + "\n\n" +
+                   i18n._("drivers.warning_nvidia_intelligent") +
+                   f"\n\n📊 {i18n._('drivers.display_server')}: {manager.display_server}")
+
+        def work(update):
+            # Sauvegarde automatique, téléchargement puis installation
+            backup_ok, backup_id, _ = manager.create_driver_backup('NVIDIA')
+            ok, filepath, message = manager.download_official_driver(info['url'], info['filename'],
+                                                                     progress_callback=update)
+            if not ok:
+                return {"stage": "download", "success": False, "message": message,
+                        "backup_id": backup_id if backup_ok else None}
+            ok, message = manager.install_nvidia_intelligently(filepath, progress_callback=update)
+            return {"stage": "install", "success": ok, "message": message,
+                    "backup_id": backup_id if backup_ok else None}
+
+        def done(result):
+            details = {'backup_id': result["backup_id"], 'display_server': manager.display_server}
+            if result["stage"] == "download":
+                details = {'error': result["message"], 'stage': 'download'}
+            manager.add_to_history(action='install', vendor='NVIDIA', driver_name=info['filename'],
+                                   driver_version=info['version'], source='official',
+                                   success=result["success"], details=details)
+            self.refresh_history()
+            self.refresh_backups()
+
+            if not result["success"]:
+                self.dialogs.show_error(i18n._("message.error.title"), result["message"])
+                return
+            self.refresh_gpu()
+            if needs_reboot:
+                self._ask_reboot(result["message"])
+            else:
+                self.dialogs.show_info(i18n._("drivers.success_title"), result["message"])
+
+        self.dialogs.ask(i18n._("drivers.warning_title"), warning, destructive=True,
+                         on_yes=lambda: self._with_progress(i18n._("drivers.downloading"), work, done))
+
+    def remove_driver(self):
+        i18n = self.i18n
+        if self.vendor == 'AMD':
+            self.dialogs.show_info(i18n._("message.info.title"), i18n._("drivers.amd_no_removal"))
+            return
+        if self.vendor == 'Intel':
+            self.dialogs.show_info(i18n._("message.info.title"), i18n._("drivers.intel_no_removal"))
+            return
+        if not self._require_vendor():
+            return
+
+        def remove():
+            def done(result):
+                success, message = result
+                self.manager.add_to_history(action='remove', vendor='NVIDIA', driver_name='proprietary',
+                                            driver_version='unknown', source='system', success=success)
+                self.refresh_history()
+                if success:
+                    self.refresh_gpu(with_repos=True)
+                    self._ask_reboot(message)
+                else:
+                    self.dialogs.show_error(i18n._("message.error.title"), message)
+
+            self._with_progress(i18n._("drivers.removing"),
+                                lambda update: self.manager.remove_driver('NVIDIA', progress_callback=update),
+                                done, pulse=True)
+
+        def confirm():
+            self.dialogs.ask(i18n._("drivers.confirm_remove_title"),
+                             i18n._("drivers.confirm_remove_driver") + "\n\n" +
+                             i18n._("drivers.opensource_fallback"),
+                             on_yes=remove, destructive=True)
+
+        self._ask_backup_then("drivers.backup_before_removal", confirm)
+
+    def restore_backup(self):
+        i18n = self.i18n
+        row = self.backups.selected()
+        if row is None:
+            self.dialogs.show_error(i18n._("message.error.title"), i18n._("drivers.error_select_backup"))
+            return
+        backup_id = row[0]
+
+        def done(result):
+            success, message = result
+            if success:
+                self.refresh_backups()
+                self.refresh_gpu(with_repos=True)
+                self._ask_reboot(message + "\n\n" + i18n._("drivers.reboot_now"))
+            else:
+                self.dialogs.show_error(i18n._("message.error.title"), message)
+
+        self.dialogs.ask(
+            i18n._("drivers.confirm_rollback_title"), i18n._("drivers.confirm_rollback", backup_id=backup_id),
+            destructive=True,
+            on_yes=lambda: self._with_progress(
+                i18n._("drivers.rolling_back"),
+                lambda update: self.manager.rollback_driver(backup_id, progress_callback=update),
+                done, pulse=True))
 
 
 def create_drivers_tab(main_window):
-    """Crée l'onglet de gestion des drivers GPU avec interface avancée"""
-    i18n = get_i18n()
-
-    # Initialiser le driver manager
-    driver_manager = DriverManager()
-
-    # Container principal avec notebook (onglets internes)
-    main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-
-    # === Barre d'informations système en haut ===
-    system_info_bar = create_system_info_bar(driver_manager, i18n)
-    main_box.pack_start(system_info_bar, False, False, 0)
-
-    # === Notebook pour les sections ===
-    notebook = Gtk.Notebook()
-    notebook.set_tab_pos(Gtk.PositionType.TOP)
-
-    # Onglet 1: Installation
-    install_tab = create_installation_tab(main_window, driver_manager, i18n)
-    notebook.append_page(install_tab, Gtk.Label(label=i18n._("drivers.tab_installation")))
-
-    # Onglet 2: Historique
-    history_tab = create_history_tab(driver_manager, i18n)
-    notebook.append_page(history_tab, Gtk.Label(label=i18n._("drivers.tab_history")))
-
-    # Onglet 3: Rollback
-    rollback_tab = create_rollback_tab(main_window, driver_manager, i18n)
-    notebook.append_page(rollback_tab, Gtk.Label(label=i18n._("drivers.tab_rollback")))
-
-    main_box.pack_start(notebook, True, True, 0)
-
-    return main_box
-
-
-def create_system_info_bar(driver_manager, i18n):
-    """Crée la barre d'informations système"""
-    frame = Gtk.Frame()
-    frame.set_shadow_type(Gtk.ShadowType.IN)
-
-    hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
-    hbox.set_margin_start(10)
-    hbox.set_margin_end(10)
-    hbox.set_margin_top(5)
-    hbox.set_margin_bottom(5)
-
-    # GPU détecté
-    gpu_info = driver_manager.detect_gpu()
-    if gpu_info:
-        gpu_label = Gtk.Label()
-        gpu_label.set_markup(f"<b>🖥️ GPU:</b> {gpu_info['vendor']} {gpu_info['model']}")
-        hbox.pack_start(gpu_label, False, False, 0)
-    else:
-        gpu_label = Gtk.Label()
-        gpu_label.set_markup(f"<b>🖥️ GPU:</b> <span color='red'>{i18n._('drivers.no_gpu_detected')}</span>")
-        hbox.pack_start(gpu_label, False, False, 0)
-
-    # Distribution
-    distro_label = Gtk.Label()
-    distro_label.set_markup(
-        f"<b>💿 {i18n._('drivers.distribution')}:</b> "
-        f"{driver_manager.distro_info['name']} {driver_manager.distro_info['version']}"
-    )
-    hbox.pack_start(distro_label, False, False, 0)
-
-    # Display Server
-    display_label = Gtk.Label()
-    display_icon = "🪟" if driver_manager.display_server == "Wayland" else "🖼️"
-    display_label.set_markup(
-        f"<b>{display_icon} {i18n._('drivers.display_server')}:</b> {driver_manager.display_server}"
-    )
-    hbox.pack_start(display_label, False, False, 0)
-
-    frame.add(hbox)
-    return frame
-
-
-def create_installation_tab(main_window, driver_manager, i18n):
-    """Crée l'onglet d'installation des drivers"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    box.set_margin_start(10)
-    box.set_margin_end(10)
-    box.set_margin_top(10)
-    box.set_margin_bottom(10)
-
-    # === Section 1: État actuel ===
-    current_frame = Gtk.Frame(label=i18n._("drivers.current_state"))
-    current_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-    current_box.set_margin_start(10)
-    current_box.set_margin_end(10)
-    current_box.set_margin_top(10)
-    current_box.set_margin_bottom(10)
-
-    gpu_label = Gtk.Label()
-    gpu_label.set_halign(Gtk.Align.START)
-    current_box.pack_start(gpu_label, False, False, 0)
-
-    current_driver_label = Gtk.Label()
-    current_driver_label.set_halign(Gtk.Align.START)
-    current_box.pack_start(current_driver_label, False, False, 0)
-
-    # Boutons d'action pour état actuel
-    current_btn_box = Gtk.Box(spacing=5)
-
-    refresh_btn = Gtk.Button(label=i18n._("button.refresh"))
-    refresh_btn.connect("clicked", lambda w: refresh_gpu_info(
-        driver_manager, gpu_label, current_driver_label, None, None, i18n
-    ))
-    current_btn_box.pack_start(refresh_btn, False, False, 0)
-
-    backup_btn = Gtk.Button(label=i18n._("drivers.create_backup"))
-    backup_btn.connect("clicked", lambda w: create_backup(
-        main_window, driver_manager, gpu_label, i18n
-    ))
-    current_btn_box.pack_start(backup_btn, False, False, 0)
-
-    remove_btn = Gtk.Button(label=i18n._("drivers.remove_driver"))
-    remove_btn.connect("clicked", lambda w: remove_current_driver(
-        main_window, driver_manager, gpu_label, current_driver_label, i18n
-    ))
-    current_btn_box.pack_start(remove_btn, False, False, 0)
-
-    current_box.pack_start(current_btn_box, False, False, 0)
-
-    current_frame.add(current_box)
-    box.pack_start(current_frame, False, False, 0)
-
-    # === Section 2: Installation depuis dépôts ===
-    repos_frame = Gtk.Frame(label=i18n._("drivers.from_repos"))
-    repos_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-    repos_vbox.set_margin_start(10)
-    repos_vbox.set_margin_end(10)
-    repos_vbox.set_margin_top(10)
-    repos_vbox.set_margin_bottom(10)
-
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_vexpand(True)
-    scrolled.set_min_content_height(120)
-
-    repos_store = Gtk.ListStore(str, str, str, bool)
-    repos_view = Gtk.TreeView(model=repos_store)
-
-    for i, title in enumerate([i18n._("drivers.column_name"), i18n._("drivers.column_version"), i18n._("drivers.column_description")]):
-        renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn(title, renderer, text=i)
-        column.set_resizable(True)
-        if i == 2:
-            column.set_expand(True)
-        repos_view.append_column(column)
-
-    scrolled.add(repos_view)
-    repos_vbox.pack_start(scrolled, True, True, 0)
-
-    repos_btn_box = Gtk.Box(spacing=5)
-
-    install_repos_btn = Gtk.Button(label=i18n._("drivers.install_from_repos"))
-    install_repos_btn.connect("clicked", lambda w: install_from_repos(
-        main_window, driver_manager, repos_view, repos_store, gpu_label, current_driver_label, i18n
-    ))
-    repos_btn_box.pack_start(install_repos_btn, False, False, 0)
-
-    repos_vbox.pack_start(repos_btn_box, False, False, 0)
-    repos_frame.add(repos_vbox)
-    box.pack_start(repos_frame, True, True, 0)
-
-    # === Section 3: Installation depuis site officiel (avec scraping) ===
-    official_frame = Gtk.Frame(label=i18n._("drivers.from_official_dynamic"))
-    official_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-    official_box.set_margin_start(10)
-    official_box.set_margin_end(10)
-    official_box.set_margin_top(10)
-    official_box.set_margin_bottom(10)
-
-    warning_label = Gtk.Label()
-    warning_label.set_markup(f"<span color='orange'><b>⚠ {i18n._('drivers.warning_advanced')}</b></span>")
-    warning_label.set_halign(Gtk.Align.START)
-    official_box.pack_start(warning_label, False, False, 0)
-
-    official_info_label = Gtk.Label()
-    official_info_label.set_halign(Gtk.Align.START)
-    official_info_label.set_line_wrap(True)
-    official_box.pack_start(official_info_label, False, False, 0)
-
-    official_btn_box = Gtk.Box(spacing=5)
-
-    scrape_btn = Gtk.Button(label=i18n._("drivers.scrape_latest"))
-    scrape_btn.connect("clicked", lambda w: scrape_and_display_official(
-        main_window, driver_manager, official_info_label, gpu_label, i18n
-    ))
-    official_btn_box.pack_start(scrape_btn, False, False, 0)
-
-    download_install_btn = Gtk.Button(label=i18n._("drivers.download_and_install"))
-    download_install_btn.connect("clicked", lambda w: download_and_install_official(
-        main_window, driver_manager, official_info_label, gpu_label, current_driver_label, i18n
-    ))
-    official_btn_box.pack_start(download_install_btn, False, False, 0)
-
-    official_box.pack_start(official_btn_box, False, False, 0)
-    official_frame.add(official_box)
-    box.pack_start(official_frame, False, False, 0)
-
-    # Rafraîchir au démarrage
-    refresh_gpu_info(driver_manager, gpu_label, current_driver_label, repos_store, repos_view, i18n)
-
-    return box
-
-
-def create_history_tab(driver_manager, i18n):
-    """Crée l'onglet d'historique des opérations"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    box.set_margin_start(10)
-    box.set_margin_end(10)
-    box.set_margin_top(10)
-    box.set_margin_bottom(10)
-
-    # Label explicatif
-    info_label = Gtk.Label()
-    info_label.set_markup(f"<b>{i18n._('drivers.history_title')}</b>\n{i18n._('drivers.history_subtitle')}")
-    info_label.set_halign(Gtk.Align.START)
-    box.pack_start(info_label, False, False, 0)
-
-    # TreeView pour l'historique
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_vexpand(True)
-
-    # timestamp, action, vendor, driver_name, version, source, success, distro
-    history_store = Gtk.ListStore(str, str, str, str, str, str, str, str)
-    history_view = Gtk.TreeView(model=history_store)
-
-    columns = [
-        i18n._("drivers.column_date"),
-        i18n._("drivers.column_action"),
-        i18n._("drivers.column_vendor"),
-        i18n._("drivers.column_driver"),
-        i18n._("drivers.column_version"),
-        i18n._("drivers.column_source"),
-        i18n._("drivers.column_status"),
-        i18n._("drivers.column_distro")
-    ]
-
-    for i, title in enumerate(columns):
-        renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn(title, renderer, text=i)
-        column.set_resizable(True)
-        if i in [3, 7]:  # Driver name et distro
-            column.set_expand(True)
-        history_view.append_column(column)
-
-    scrolled.add(history_view)
-    box.pack_start(scrolled, True, True, 0)
-
-    # Boutons
-    btn_box = Gtk.Box(spacing=5)
-
-    refresh_history_btn = Gtk.Button(label=i18n._("button.refresh"))
-    refresh_history_btn.connect("clicked", lambda w: refresh_history(
-        driver_manager, history_store, i18n
-    ))
-    btn_box.pack_start(refresh_history_btn, False, False, 0)
-
-    box.pack_start(btn_box, False, False, 0)
-
-    # Charger l'historique au démarrage
-    refresh_history(driver_manager, history_store, i18n)
-
-    return box
-
-
-def create_rollback_tab(main_window, driver_manager, i18n):
-    """Crée l'onglet de rollback/sauvegardes"""
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-    box.set_margin_start(10)
-    box.set_margin_end(10)
-    box.set_margin_top(10)
-    box.set_margin_bottom(10)
-
-    # Label explicatif
-    info_label = Gtk.Label()
-    info_label.set_markup(f"<b>{i18n._('drivers.rollback_title')}</b>\n{i18n._('drivers.rollback_subtitle')}")
-    info_label.set_halign(Gtk.Align.START)
-    box.pack_start(info_label, False, False, 0)
-
-    # TreeView pour les sauvegardes
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_vexpand(True)
-
-    # backup_id, timestamp, vendor, driver_name, driver_version, distro
-    backup_store = Gtk.ListStore(str, str, str, str, str, str)
-    backup_view = Gtk.TreeView(model=backup_store)
-
-    columns = [
-        i18n._("drivers.column_backup_id"),
-        i18n._("drivers.column_date"),
-        i18n._("drivers.column_vendor"),
-        i18n._("drivers.column_driver"),
-        i18n._("drivers.column_version"),
-        i18n._("drivers.column_distro")
-    ]
-
-    for i, title in enumerate(columns):
-        renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn(title, renderer, text=i)
-        column.set_resizable(True)
-        if i in [0, 3]:  # Backup ID et driver name
-            column.set_expand(True)
-        backup_view.append_column(column)
-
-    scrolled.add(backup_view)
-    box.pack_start(scrolled, True, True, 0)
-
-    # Boutons
-    btn_box = Gtk.Box(spacing=5)
-
-    refresh_backup_btn = Gtk.Button(label=i18n._("button.refresh"))
-    refresh_backup_btn.connect("clicked", lambda w: refresh_backups(
-        driver_manager, backup_store, i18n
-    ))
-    btn_box.pack_start(refresh_backup_btn, False, False, 0)
-
-    restore_btn = Gtk.Button(label=i18n._("drivers.restore_backup"))
-    restore_btn.connect("clicked", lambda w: restore_from_backup(
-        main_window, driver_manager, backup_view, backup_store, i18n
-    ))
-    btn_box.pack_start(restore_btn, False, False, 0)
-
-    box.pack_start(btn_box, False, False, 0)
-
-    # Charger les sauvegardes au démarrage
-    refresh_backups(driver_manager, backup_store, i18n)
-
-    return box
-
-
-# ==========================================
-# FONCTIONS DE RAFRAÎCHISSEMENT
-# ==========================================
-
-def refresh_gpu_info(driver_manager, gpu_label, current_driver_label, repos_store, repos_view, i18n):
-    """Rafraîchit les informations GPU et driver actuel"""
-    # Détecter le GPU
-    gpu_info = driver_manager.detect_gpu()
-
-    if gpu_info:
-        vendor = gpu_info['vendor']
-        model = gpu_info['model']
-        pci_id = gpu_info['pci_id']
-
-        gpu_label.set_markup(
-            f"<b>{i18n._('drivers.detected_gpu')}</b> {vendor} {model} ({pci_id})"
-        )
-
-        # Récupérer driver actuel
-        current_driver = driver_manager.get_current_driver(vendor)
-        if current_driver:
-            current_driver_label.set_markup(
-                f"<b>{i18n._('drivers.current_driver')}</b> "
-                f"{current_driver['name']} - {current_driver['version']} "
-                f"({i18n._('drivers.source_' + current_driver['source'])})"
-            )
-        else:
-            current_driver_label.set_markup(
-                f"<b>{i18n._('drivers.current_driver')}</b> {i18n._('drivers.no_driver')}"
-            )
-
-        # Lister drivers disponibles si store fourni
-        if repos_store is not None:
-            repos_store.clear()
-            if vendor in ['NVIDIA', 'AMD', 'Intel']:
-                drivers = driver_manager.get_available_drivers_from_repos(vendor)
-                if vendor == 'NVIDIA' and not driver_manager.is_nonfree_enabled():
-                    current_driver_label.set_markup(
-                        current_driver_label.get_label() +
-                        f"\n<span color='orange'>⚠ {i18n._('drivers.nonfree_required')}</span>"
-                    )
-                for driver in drivers:
-                    name = driver['name']
-                    if driver['recommended']:
-                        name += f" ⭐ ({i18n._('drivers.recommended')})"
-
-                    repos_store.append([
-                        driver['name'],
-                        driver['version'],
-                        driver['description'],
-                        driver['recommended']
-                    ])
-    else:
-        gpu_label.set_markup(
-            f"<span color='red'>{i18n._('drivers.no_gpu_detected')}</span>"
-        )
-        current_driver_label.set_text("")
-
-
-def refresh_history(driver_manager, history_store, i18n):
-    """Rafraîchit l'historique des opérations"""
-    history_store.clear()
-
-    history = driver_manager.get_history()
-
-    for entry in reversed(history):  # Plus récent en premier
-        timestamp = datetime.fromisoformat(entry['timestamp']).strftime('%Y-%m-%d %H:%M')
-        action = i18n._(f"drivers.action_{entry['action']}")
-        vendor = entry['vendor']
-        driver_name = entry['driver_name']
-        version = entry['driver_version']
-        source = i18n._(f"drivers.source_{entry['source']}")
-        status = "✅" if entry['success'] else "❌"
-        distro = entry.get('distro', 'Unknown')
-
-        history_store.append([
-            timestamp,
-            action,
-            vendor,
-            driver_name,
-            version,
-            source,
-            status,
-            distro
-        ])
-
-
-def refresh_backups(driver_manager, backup_store, i18n):
-    """Rafraîchit la liste des sauvegardes"""
-    backup_store.clear()
-
-    backups = driver_manager.list_backups()
-
-    for backup in backups:
-        timestamp = datetime.fromisoformat(backup['timestamp']).strftime('%Y-%m-%d %H:%M')
-        vendor = backup['vendor']
-        driver_info = backup['driver']
-        driver_name = driver_info.get('name', 'Unknown')
-        driver_version = driver_info.get('version', 'Unknown')
-        distro = f"{backup['distro']['id']} {backup['distro']['version']}"
-
-        backup_store.append([
-            backup['backup_id'],
-            timestamp,
-            vendor,
-            driver_name,
-            driver_version,
-            distro
-        ])
-
-
-# ==========================================
-# FONCTIONS D'ACTION
-# ==========================================
-
-def create_backup(main_window, driver_manager, gpu_label, i18n):
-    """Crée une sauvegarde du driver actuel"""
-    # Récupérer le vendor
-    gpu_text = gpu_label.get_text()
-
-    vendor = None
-    if 'NVIDIA' in gpu_text:
-        vendor = 'NVIDIA'
-    elif 'AMD' in gpu_text:
-        vendor = 'AMD'
-    elif 'Intel' in gpu_text:
-        vendor = 'Intel'
-
-    if not vendor:
-        main_window.dialogs.show_error(
-            i18n._("message.error.title"),
-            i18n._("drivers.detect_gpu_first")
-        )
-        return
-
-    # Créer dialogue de progression
-    dialog = Gtk.Dialog(
-        title=i18n._("drivers.creating_backup"),
-        transient_for=main_window,
-        modal=True
-    )
-    dialog.set_default_size(400, 150)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(10)
-    content.set_margin_end(10)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
-
-    status_label = Gtk.Label(label=i18n._("drivers.preparing"))
-    content.pack_start(status_label, False, False, 0)
-
-    progress = Gtk.ProgressBar()
-    progress.set_show_text(True)
-    content.pack_start(progress, False, False, 0)
-
-    dialog.show_all()
-
-    def backup_thread():
-        def update_progress(message, fraction):
-            GLib.idle_add(lambda: status_label.set_text(message))
-            GLib.idle_add(lambda: progress.set_fraction(fraction))
-
-        success, backup_id, message = driver_manager.create_driver_backup(
-            vendor,
-            progress_callback=update_progress
-        )
-
-        GLib.idle_add(dialog.destroy)
-
-        if success:
-            GLib.idle_add(lambda: main_window.dialogs.show_info(
-                i18n._("drivers.success_title"),
-                f"{message}\n\n{i18n._('drivers.backup_saved')}"
-            ))
-        else:
-            GLib.idle_add(lambda: main_window.dialogs.show_error(
-                i18n._("message.error.title"),
-                message
-            ))
-
-    thread = threading.Thread(target=backup_thread, daemon=True)
-    thread.start()
-
-
-def install_from_repos(main_window, driver_manager, view, store, gpu_label, current_driver_label, i18n):
-    """Installe un driver depuis les dépôts"""
-    selection = view.get_selection()
-    model, treeiter = selection.get_selected()
-
-    if not treeiter:
-        main_window.dialogs.show_error(
-            i18n._("message.error.title"),
-            i18n._("drivers.error_select_driver")
-        )
-        return
-
-    package_name = model[treeiter][0]
-
-    # Récupérer vendor depuis le label GPU
-    gpu_text = gpu_label.get_text()
-    vendor = None
-    if 'NVIDIA' in gpu_text:
-        vendor = 'NVIDIA'
-    elif 'AMD' in gpu_text:
-        vendor = 'AMD'
-    elif 'Intel' in gpu_text:
-        vendor = 'Intel'
-
-    # Demander si on veut créer un backup
-    response = main_window.dialogs.show_question(
-        i18n._("drivers.create_backup_before"),
-        i18n._("drivers.backup_recommended")
-    )
-
-    if response:
-        # Créer backup d'abord
-        success, backup_id, msg = driver_manager.create_driver_backup(vendor)
-        if not success:
-            main_window.dialogs.show_warning(
-                i18n._("drivers.backup_failed"),
-                f"{msg}\n\n{i18n._('drivers.continue_anyway')}"
-            )
-
-    # Confirmation installation
-    response = main_window.dialogs.show_question(
-        i18n._("drivers.confirm_install_title"),
-        i18n._("drivers.confirm_install_repos", driver=package_name) + "\n\n" +
-        i18n._("drivers.reboot_required")
-    )
-
-    if not response:
-        return
-
-    # Dialogue de progression
-    dialog = Gtk.Dialog(
-        title=i18n._("drivers.installing"),
-        transient_for=main_window,
-        modal=True
-    )
-    dialog.set_default_size(400, 150)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(10)
-    content.set_margin_end(10)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
-
-    status_label = Gtk.Label(label=i18n._("drivers.preparing"))
-    content.pack_start(status_label, False, False, 0)
-
-    progress = Gtk.ProgressBar()
-    progress.set_show_text(True)
-    content.pack_start(progress, False, False, 0)
-
-    dialog.show_all()
-
-    def install_thread():
-        def update_progress(message, fraction):
-            GLib.idle_add(lambda: status_label.set_text(message))
-            GLib.idle_add(lambda: progress.set_fraction(fraction))
-
-        success, message = driver_manager.install_from_repos(
-            package_name,
-            progress_callback=update_progress
-        )
-
-        GLib.idle_add(dialog.destroy)
-
-        if success:
-            # Ajouter à l'historique
-            driver_manager.add_to_history(
-                action='install',
-                vendor=vendor,
-                driver_name=package_name,
-                driver_version='repository',
-                source='repository',
-                success=True
-            )
-
-            GLib.idle_add(lambda: main_window.dialogs.show_info(
-                i18n._("drivers.success_title"),
-                message + "\n\n" + i18n._("drivers.reboot_now")
-            ))
-            GLib.idle_add(lambda: refresh_gpu_info(
-                driver_manager, gpu_label, current_driver_label, store, view, i18n
-            ))
-        else:
-            driver_manager.add_to_history(
-                action='install',
-                vendor=vendor,
-                driver_name=package_name,
-                driver_version='repository',
-                source='repository',
-                success=False,
-                details={'error': message}
-            )
-
-            GLib.idle_add(lambda: main_window.dialogs.show_error(
-                i18n._("message.error.title"),
-                message
-            ))
-
-    thread = threading.Thread(target=install_thread, daemon=True)
-    thread.start()
-
-
-def scrape_and_display_official(main_window, driver_manager, info_label, gpu_label, i18n):
-    """Scrape et affiche les informations officielles en temps réel"""
-    gpu_text = gpu_label.get_text()
-
-    vendor = None
-    if 'NVIDIA' in gpu_text:
-        vendor = 'NVIDIA'
-    else:
-        # AMD et Intel : pilotes libres fournis par les dépôts Debian uniquement
-        info_label.set_markup(
-            f"<span color='red'>{i18n._('drivers.scraping_not_supported')}</span>"
-        )
-        return
-
-    # Dialogue de progression pour le scraping
-    dialog = Gtk.Dialog(
-        title=i18n._("drivers.scraping_title"),
-        transient_for=main_window,
-        modal=True
-    )
-    dialog.set_default_size(400, 150)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(10)
-    content.set_margin_end(10)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
-
-    status_label = Gtk.Label(label=i18n._("drivers.scraping_in_progress"))
-    content.pack_start(status_label, False, False, 0)
-
-    progress = Gtk.ProgressBar()
-    progress.pulse()
-    content.pack_start(progress, False, False, 0)
-
-    dialog.show_all()
-
-    def scrape_thread():
-        def update_progress(message, fraction):
-            GLib.idle_add(lambda: status_label.set_text(message))
-
-        # Pulser la barre de progression
-        def pulse():
-            progress.pulse()
-            return True
-
-        pulse_id = GLib.timeout_add(100, pulse)
-
-        official_info = driver_manager.scrape_nvidia_latest_version(progress_callback=update_progress)
-
-        GLib.source_remove(pulse_id)
-        GLib.idle_add(dialog.destroy)
-
-        if official_info:
-            info_text = f"<b>{i18n._('drivers.latest_official')}</b> {official_info['version']}\n"
-            info_text += f"{i18n._('drivers.size')}: {official_info['size']}\n"
-            info_text += f"{i18n._('drivers.date')}: {official_info['date']}"
-
-            if 'note' in official_info:
-                info_text += f"\n<i>{official_info['note']}</i>"
-
-            # Stocker les infos dans une propriété du label pour utilisation ultérieure
-            info_label.official_data = official_info
-            GLib.idle_add(lambda: info_label.set_markup(info_text))
-        else:
-            GLib.idle_add(lambda: info_label.set_markup(
-                f"<span color='red'>{i18n._('drivers.error_fetch_info')}</span>"
-            ))
-
-    thread = threading.Thread(target=scrape_thread, daemon=True)
-    thread.start()
-
-
-def download_and_install_official(main_window, driver_manager, info_label, gpu_label, current_driver_label, i18n):
-    """Télécharge et installe depuis le site officiel"""
-    # Vérifier qu'on a les infos scrapées
-    if not hasattr(info_label, 'official_data'):
-        main_window.dialogs.show_error(
-            i18n._("message.error.title"),
-            i18n._("drivers.scrape_first")
-        )
-        return
-
-    official_info = info_label.official_data
-    gpu_text = gpu_label.get_text()
-
-    vendor = None
-    if 'NVIDIA' in gpu_text:
-        vendor = 'NVIDIA'
-
-    if not vendor:
-        main_window.dialogs.show_error(
-            i18n._("message.error.title"),
-            i18n._("drivers.detect_gpu_first")
-        )
-        return
-
-    # Avertissement avancé
-    warning_msg = i18n._("drivers.warning_official_install")
-    if vendor == 'NVIDIA':
-        warning_msg += "\n\n" + i18n._("drivers.warning_nvidia_intelligent")
-        warning_msg += f"\n\n📊 {i18n._('drivers.display_server')}: {driver_manager.display_server}"
-
-    response = main_window.dialogs.show_question(
-        i18n._("drivers.warning_title"),
-        warning_msg
-    )
-
-    if not response:
-        return
-
-    # Créer backup automatique
-    backup_success, backup_id, _ = driver_manager.create_driver_backup(vendor)
-
-    # Téléchargement + Installation
-    dialog = Gtk.Dialog(
-        title=i18n._("drivers.downloading"),
-        transient_for=main_window,
-        modal=True
-    )
-    dialog.set_default_size(450, 150)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(10)
-    content.set_margin_end(10)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
-
-    status_label = Gtk.Label(label=i18n._("drivers.preparing"))
-    content.pack_start(status_label, False, False, 0)
-
-    progress = Gtk.ProgressBar()
-    progress.set_show_text(True)
-    content.pack_start(progress, False, False, 0)
-
-    dialog.show_all()
-
-    def download_install_thread():
-        def update_progress(message, fraction):
-            GLib.idle_add(lambda: status_label.set_text(message))
-            GLib.idle_add(lambda: progress.set_fraction(fraction))
-
-        # Télécharger
-        success, filepath, message = driver_manager.download_official_driver(
-            official_info['url'],
-            official_info['filename'],
-            progress_callback=update_progress
-        )
-
-        if not success:
-            GLib.idle_add(dialog.destroy)
-            driver_manager.add_to_history(
-                action='install',
-                vendor=vendor,
-                driver_name=official_info['filename'],
-                driver_version=official_info['version'],
-                source='official',
-                success=False,
-                details={'error': message, 'stage': 'download'}
-            )
-            GLib.idle_add(lambda: main_window.dialogs.show_error(
-                i18n._("message.error.title"),
-                message
-            ))
-            return
-
-        # Installer intelligemment (NVIDIA uniquement)
-        success, install_msg = driver_manager.install_nvidia_intelligently(
-            filepath,
-            progress_callback=update_progress
-        )
-
-        GLib.idle_add(dialog.destroy)
-
-        # Ajouter à l'historique
-        driver_manager.add_to_history(
-            action='install',
-            vendor=vendor,
-            driver_name=official_info['filename'],
-            driver_version=official_info['version'],
-            source='official',
-            success=success,
-            details={
-                'backup_id': backup_id if backup_success else None,
-                'display_server': driver_manager.display_server
-            }
-        )
-
-        if success:
-            # Si NVIDIA + systemd, demander redémarrage
-            if vendor == 'NVIDIA' and "redémarrage" in install_msg.lower():
-                # La question doit être posée dans le thread GTK, le reboot suit la réponse
-                def ask_reboot():
-                    if main_window.dialogs.show_question(i18n._("drivers.success_title"), install_msg):
-                        success_reboot, _, error = PkexecHelper.reboot()
-                        if not success_reboot:
-                            main_window.dialogs.show_error(i18n._("message.error.title"), error)
-                    return False
-                GLib.idle_add(ask_reboot)
-            else:
-                GLib.idle_add(lambda: main_window.dialogs.show_info(
-                    i18n._("drivers.success_title"),
-                    install_msg
-                ))
-
-            GLib.idle_add(lambda: refresh_gpu_info(
-                driver_manager, gpu_label, current_driver_label, None, None, i18n
-            ))
-        else:
-            GLib.idle_add(lambda: main_window.dialogs.show_error(
-                i18n._("message.error.title"),
-                install_msg
-            ))
-
-    thread = threading.Thread(target=download_install_thread, daemon=True)
-    thread.start()
-
-
-def remove_current_driver(main_window, driver_manager, gpu_label, current_driver_label, i18n):
-    """Supprime le driver propriétaire actuel"""
-    gpu_text = gpu_label.get_text()
-
-    vendor = None
-    if 'NVIDIA' in gpu_text:
-        vendor = 'NVIDIA'
-    elif 'AMD' in gpu_text:
-        main_window.dialogs.show_info(
-            i18n._("message.info.title"),
-            i18n._("drivers.amd_no_removal")
-        )
-        return
-    elif 'Intel' in gpu_text:
-        main_window.dialogs.show_info(
-            i18n._("message.info.title"),
-            i18n._("drivers.intel_no_removal")
-        )
-        return
-
-    if not vendor:
-        main_window.dialogs.show_error(
-            i18n._("message.error.title"),
-            i18n._("drivers.detect_gpu_first")
-        )
-        return
-
-    # Créer backup avant suppression
-    response = main_window.dialogs.show_question(
-        i18n._("drivers.create_backup_before"),
-        i18n._("drivers.backup_before_removal")
-    )
-
-    if response:
-        driver_manager.create_driver_backup(vendor)
-
-    # Confirmation
-    response = main_window.dialogs.show_question(
-        i18n._("drivers.confirm_remove_title"),
-        i18n._("drivers.confirm_remove_driver") + "\n\n" +
-        i18n._("drivers.opensource_fallback")
-    )
-
-    if not response:
-        return
-
-    # Suppression
-    dialog = Gtk.Dialog(
-        title=i18n._("drivers.removing"),
-        transient_for=main_window,
-        modal=True
-    )
-    dialog.set_default_size(400, 150)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(10)
-    content.set_margin_end(10)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
-
-    status_label = Gtk.Label(label=i18n._("drivers.removing_driver"))
-    content.pack_start(status_label, False, False, 0)
-
-    progress = Gtk.ProgressBar()
-    progress.pulse()
-    content.pack_start(progress, False, False, 0)
-
-    dialog.show_all()
-
-    def remove_thread():
-        def update_progress(message, fraction):
-            GLib.idle_add(lambda: status_label.set_text(message))
-
-        success, message = driver_manager.remove_driver(vendor, progress_callback=update_progress)
-
-        GLib.idle_add(dialog.destroy)
-
-        # Ajouter à l'historique
-        driver_manager.add_to_history(
-            action='remove',
-            vendor=vendor,
-            driver_name='proprietary',
-            driver_version='unknown',
-            source='system',
-            success=success
-        )
-
-        if success:
-            GLib.idle_add(lambda: main_window.dialogs.show_info(
-                i18n._("drivers.success_title"),
-                message
-            ))
-            GLib.idle_add(lambda: refresh_gpu_info(
-                driver_manager, gpu_label, current_driver_label, None, None, i18n
-            ))
-        else:
-            GLib.idle_add(lambda: main_window.dialogs.show_error(
-                i18n._("message.error.title"),
-                message
-            ))
-
-    thread = threading.Thread(target=remove_thread, daemon=True)
-    thread.start()
-
-
-def restore_from_backup(main_window, driver_manager, view, store, i18n):
-    """Restaure un driver depuis une sauvegarde"""
-    selection = view.get_selection()
-    model, treeiter = selection.get_selected()
-
-    if not treeiter:
-        main_window.dialogs.show_error(
-            i18n._("message.error.title"),
-            i18n._("drivers.error_select_backup")
-        )
-        return
-
-    backup_id = model[treeiter][0]
-
-    # Confirmation
-    response = main_window.dialogs.show_question(
-        i18n._("drivers.confirm_rollback_title"),
-        i18n._("drivers.confirm_rollback", backup_id=backup_id)
-    )
-
-    if not response:
-        return
-
-    # Dialogue de progression
-    dialog = Gtk.Dialog(
-        title=i18n._("drivers.rolling_back"),
-        transient_for=main_window,
-        modal=True
-    )
-    dialog.set_default_size(400, 150)
-
-    content = dialog.get_content_area()
-    content.set_spacing(10)
-    content.set_margin_start(10)
-    content.set_margin_end(10)
-    content.set_margin_top(10)
-    content.set_margin_bottom(10)
-
-    status_label = Gtk.Label(label=i18n._("drivers.preparing"))
-    content.pack_start(status_label, False, False, 0)
-
-    progress = Gtk.ProgressBar()
-    progress.pulse()
-    content.pack_start(progress, False, False, 0)
-
-    dialog.show_all()
-
-    def rollback_thread():
-        def update_progress(message, fraction):
-            GLib.idle_add(lambda: status_label.set_text(message))
-
-        success, message = driver_manager.rollback_driver(
-            backup_id,
-            progress_callback=update_progress
-        )
-
-        GLib.idle_add(dialog.destroy)
-
-        if success:
-            GLib.idle_add(lambda: main_window.dialogs.show_info(
-                i18n._("drivers.success_title"),
-                message + "\n\n" + i18n._("drivers.reboot_now")
-            ))
-            GLib.idle_add(lambda: refresh_backups(driver_manager, store, i18n))
-        else:
-            GLib.idle_add(lambda: main_window.dialogs.show_error(
-                i18n._("message.error.title"),
-                message
-            ))
-
-    thread = threading.Thread(target=rollback_thread, daemon=True)
-    thread.start()
+    """Crée l'onglet de gestion des pilotes GPU"""
+    page = DriversPage(main_window)
+    main_window.drivers_page = page
+    return page.build()

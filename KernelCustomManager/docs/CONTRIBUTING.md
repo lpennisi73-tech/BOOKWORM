@@ -68,7 +68,7 @@ Help improve documentation by:
 ```bash
 # Debian
 sudo apt update
-sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-notify-0.7
+sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
 
 # Development tools
 sudo apt install git python3-pip
@@ -94,7 +94,7 @@ KernelCustomManager/
 ├── core/                           # Business logic
 │   ├── kernel_manager.py           # Kernel operations
 │   └── driver_manager.py           # GPU driver operations
-├── gui/                            # GTK3 interface
+├── gui/                            # GTK4 + libadwaita interface
 │   ├── main_window.py              # Main window
 │   ├── kernels_tab.py              # Kernels tab
 │   ├── packages_tab.py             # Packages tab
@@ -181,17 +181,16 @@ def install_driver(driver_name, version, source):
     pass
 ```
 
-### GTK3 Guidelines
+### GTK4 / libadwaita Guidelines
 ```python
-# Use GLib.idle_add for UI updates from threads
-def _background_task():
-    result = do_work()
-    GLib.idle_add(update_ui, result)
+# Long or privileged work: run_task() runs it in a thread and calls back in the GTK thread
+from utils.dialogs import run_task
+run_task(lambda: PkexecHelper.reboot(), on_done=show_result, on_error=show_error)
 
-# Always destroy dialogs after use
-dialog = Gtk.Dialog()
-response = dialog.run()
-dialog.destroy()
+# Dialogs are asynchronous (no dialog.run()): pass the follow-up as a callback
+main_window.dialogs.ask(title, message, on_yes=do_it, destructive=True)
+
+# Tables: gui.widgets.SimpleList (Gtk.ColumnView), not Gtk.TreeView
 
 # Use context managers when possible
 with open(file_path, 'r') as f:

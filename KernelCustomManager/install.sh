@@ -32,11 +32,8 @@ sudo apt update
 sudo apt install -y \
     python3 \
     python3-gi \
-    gir1.2-gtk-3.0 \
     gir1.2-gtk-4.0 \
     gir1.2-adw-1 \
-    gir1.2-notify-0.7 \
-    libnotify-bin \
     build-essential \
     bc bison flex \
     libssl-dev libelf-dev \
@@ -74,7 +71,8 @@ echo "   ✓ Règles PolicyKit installées (mot de passe mémorisé quelques min
 # Créer le lanceur d'application
 echo "🚀 Installation du lanceur d'application..."
 INSTALL_DIR="$(pwd)"
-DESKTOP_FILE="$HOME/.local/share/applications/kernelcustom.desktop"
+DESKTOP_FILE="$HOME/.local/share/applications/com.kernelcustom.manager.desktop"
+rm -f "$HOME/.local/share/applications/kernelcustom.desktop"  # ancien nom (v2.x)
 
 # Créer le répertoire s'il n'existe pas
 mkdir -p "$HOME/.local/share/applications"
@@ -87,11 +85,11 @@ Type=Application
 Name=KernelCustom Manager
 Comment=Gestionnaire de kernels personnalisés
 Exec=python3 $INSTALL_DIR/kernelcustom_manager.py
-Icon=$INSTALL_DIR/icon.png
+Icon=$INSTALL_DIR/data/icons/hicolor/256x256/apps/com.kernelcustom.manager.png
 Terminal=false
 Categories=System;Settings;
 Keywords=kernel;compile;linux;
-StartupWMClass=KernelCustom Manager
+StartupWMClass=com.kernelcustom.manager
 StartupNotify=true
 EOF
 
@@ -106,7 +104,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 fi
 
-echo "   ✓ Lanceur créé avec l'icône: $INSTALL_DIR/icon.png"
+echo "   ✓ Lanceur créé avec l'icône: $INSTALL_DIR/data/icons/hicolor/256x256/apps/com.kernelcustom.manager.png"
 
 echo "✅ Lanceur installé dans : $DESKTOP_FILE"
 echo "   Redémarrez votre session si le lanceur n'apparaît pas immédiatement"

@@ -17,7 +17,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 | Bash | **Tout est porté en Python**, y compris `manage_kernel_sources.sh`, `kernelcustom-helper` et `scripts/secureboot/*.sh`. Les commandes système (`make`, `dpkg`, `apt`, `mokutil`, `sign-file`, `pkexec`) restent appelées via `subprocess` avec des listes d'arguments |
 | Paquet | Option A : répertoire `debian/` + debhelper, vérifié par `lintian` |
 | Dossier de travail | Standard XDG `~/.local/share/kernelcustom-manager/` (au lieu de `~/KernelCustomManager/build`), **avec migration automatique** de l'ancien dossier |
-| Interface | **Portage GTK3 → GTK4 + libadwaita** (`Adw.Application`) |
+| Interface | **GTK4 + libadwaita** (`Adw.Application`), portage fait à l'étape 7 |
 
 ## Plan (un commit par étape)
 
@@ -27,7 +27,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - [x] **4. Portage du bash restant** : `manage_kernel_sources.sh` → `core/sources_manager.py` + actions `sources-*` du helper. `scripts/secureboot/*.sh` supprimés (doublons de l'app ; seul le contrôle shim/mmx64.efi était nouveau → intégré au diagnostic via `mokutil-diagnose`). Script de compilation `bash -c` → `core/build_runner.py` lancé via `utils/terminal.py`
 - [x] **5. Chemins centralisés** : `utils/paths.py` (code, traductions, icônes, runner, helpers, données XDG, configuration) + migration automatique de `~/KernelCustomManager/build`
 - [x] **6. Outil de nettoyage (logique)** : `core/cleanup_manager.py` (`scan()` / `clean()`, sans GTK) + traductions `cleanup.*`. **L'interface sera écrite en GTK4 à l'étape 7** (onglet ou dialogue « 🧹 Nettoyage »)
-- [ ] **7. Portage GTK4 + libadwaita** : onglet par onglet (voir la section dédiée). L'interface de l'outil de nettoyage est écrite directement en GTK4 si l'étape 6 arrive après le début du portage
+- [x] **7. Portage GTK4 + libadwaita** (branche `gtk4`) : `Adw.Application`, fenêtre `Adw.ApplicationWindow` + `Adw.ViewStack`, dialogues asynchrones, `Gtk.ColumnView`, `Gio.Notification`, nouvel onglet « Nettoyage ». Voir « Interface GTK4 »
 - [ ] **8. Paquet .deb (TOUT À LA FIN)** : création de `debian/`, construction, `lintian`, test d'installation et de désinstallation. Supprimer `install.sh`, `uninstall-policykit.sh` et le dossier en double `KernelCustomManager/` (il ne contient que des `__init__.py` vides)
 - [ ] **9. Release v3.0** : mise à jour de la version, du changelog Debian et de la doc
 
@@ -47,7 +47,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 
 ## Chemins (étape 5)
 
-- **Tous les chemins viennent de `utils/paths.py`** : `APP_DIR`, `TRANSLATIONS_DIR`, `ICON_PNG`/`ICON_SVG`, `BUILD_RUNNER`, `HELPER_DIR` (fixe : `/usr/libexec/kernelcustom-manager`, référencé par la policy), `data_dir()` et `config_dir()`. Ne pas utiliser `Path.home()` ni `__file__` ailleurs.
+- **Tous les chemins viennent de `utils/paths.py`** : `APP_DIR`, `APP_ID` (`kernelcustom-manager`), `APPLICATION_ID` (`com.kernelcustom.manager` : id GTK/D-Bus, nom de l'icône et du .desktop), `TRANSLATIONS_DIR`, `ICONS_DIR` (`data/icons/hicolor/…`), `BUILD_RUNNER`, `HELPER_DIR` (fixe : `/usr/libexec/kernelcustom-manager`, référencé par la policy), `data_dir()` et `config_dir()`. Ne pas utiliser `Path.home()` ni `__file__` ailleurs.
 - `data_dir()` = `$KCM_DATA_DIR`, sinon `$XDG_DATA_HOME/kernelcustom-manager`, sinon `~/.local/share/kernelcustom-manager`. `config_dir()` = `~/.config/kernelcustom-manager` (fichier `language.conf`).
 - Journal : `data_dir()/logs/kernelcustom-manager.log`, configuré dans `kernelcustom_manager.py` (`setup_logging`, `force=True`). Les modules utilisent `logging` sans le configurer. Dans `utils/paths.py`, utiliser `log = logging.getLogger(__name__)`, car un `logging.info()` avant la configuration crée une configuration implicite.
 - **Migration** (`paths.migrate_legacy_data()`) : appelée dans `main()` **avant** l'import de `gui.main_window`. Elle déplace l'ancien dossier, réécrit les liens absolus internes (profondeur 2) et laisse un lien de compatibilité si des liens de `/usr/src` pointent vers l'ancien emplacement. Elle ne fait rien si le nouveau dossier est déjà rempli. Un message est affiché une fois.
@@ -89,27 +89,24 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - `Recommends` : mokutil, sbsigntool, shim-signed, firmware-amd-graphics
 - Aucun fichier écrit dans le `$HOME` à l'installation. Les données utilisateur sont créées au lancement.
 
-## Portage GTK4 : points à traiter
+## Interface GTK4 (étape 7)
 
-État relevé au départ : environ 210 `pack_start`/`pack_end`, 131 `add()`, 22 `show_all`, 26 `.run()` de dialogues bloquants, 34 `Gtk.Dialog`/`MessageDialog`, 10 `FileChooser`, 30 `TreeView`/`ListStore`, 95 `GLib.idle_add` et des threads.
-
-| GTK3 | GTK4 / libadwaita |
-|---|---|
-| `Gtk.main()` / `Gtk.main_quit` | `Adw.Application` + `app.run()` (id `com.kernelcustom.manager`) |
-| `Gtk.Window` principal | `Adw.ApplicationWindow` (+ `Adw.ToolbarView`, `Adw.HeaderBar`, `Adw.ViewStack`/`ViewSwitcher` pour les onglets) |
-| `box.pack_start(w, expand, fill, pad)` | `box.append(w)` + `set_hexpand`/`set_vexpand`/marges |
-| `container.add(w)` | `set_child(w)` / `append(w)` selon le widget |
-| `show_all()` | à supprimer (widgets visibles par défaut) |
-| `dialog.run()` bloquant | **asynchrone** : `Adw.AlertDialog` + `choose()`/callback `response`. C'est la plus grosse refonte : il faut transformer le code appelant en callbacks |
-| `Gtk.FileChooserDialog` | `Gtk.FileDialog` (asynchrone) |
-| `Gtk.TreeView` + `ListStore` | `Gtk.ColumnView` + `Gio.ListStore` (TreeView reste utilisable mais est déprécié) |
-| `Notify` (libnotify) | `Gio.Notification` + `app.send_notification()` |
-| Signaux d'événements (`button-press-event`…) | `Gtk.GestureClick`, `Gtk.EventControllerKey` |
-| `Gtk.Image.new_from_icon_name(name, size)` | `Gtk.Image.new_from_icon_name(name)` + `set_pixel_size` |
-
-- Les mises à jour d'interface depuis les threads continuent de passer par `GLib.idle_add`.
-- Ordre de portage conseillé : `utils/dialogs.py` (créer une API de dialogues async réutilisable) → `main_window.py` → onglets simples (history, profiles, packages, kernels) → sources → build (`build_tab*.py`) → drivers → secureboot (le plus gros).
-- Lancer un terminal externe (`gnome-terminal`, `ptyxis`, `konsole`, `xterm`) : garder le principe, mais sans `bash -c` avec du texte interpolé non échappé (utiliser `shlex.quote`).
+- **GTK 4 + libadwaita uniquement** (`gi.require_version('Gtk', '4.0')`, `'Adw', '1'`). Aucun code GTK3 (`pack_start`, `show_all`, `dialog.run()`, `Gtk.TreeView`, `Notify`…).
+- Point d'entrée : `kernelcustom_manager.py` → `KernelCustomApplication(Adw.Application)`, id `com.kernelcustom.manager`. Icône chargée par nom (`Gtk.Window.set_default_icon_name`) ; depuis le dépôt, `paths.ICONS_DIR` est ajouté au thème d'icônes.
+- Fenêtre : `gui/main_window.py`. La table `PAGES` liste les onglets (nom, clé de traduction, icône symbolique, module, fonction `create_*_tab(main_window)`). `Adw.ViewSwitcher` dans la barre de titre, remplacé par `Adw.ViewSwitcherBar` en bas sous 1550 sp (9 onglets). Menu principal : langue, à propos, quitter.
+- **Dialogues : `utils/dialogs.py` (`main_window.dialogs`), tous asynchrones**. Le code qui suit une réponse est passé en callback :
+  - `show_info` / `show_warning` / `show_error(title, message, on_close=None)`, `toast(message)` pour les confirmations discrètes ;
+  - `ask(title, message, on_yes, on_no=None, destructive=False, yes_label=, no_label=)`. **Il n'y a plus de `show_question()`** ;
+  - `form(title, child, ok_label, on_ok)` (Adw.AlertDialog + formulaire) et `window(title, child, ok_label, on_ok)` (Adw.Dialog). Pour `window`, `on_ok()` renvoie True pour fermer ;
+  - `progress(title, status, cancellable=False)` → `ProgressDialog` dont `set_status`, `set_fraction`, `pulse`, `close` et `.cancelled` sont **utilisables depuis un thread** ;
+  - `open_file(title, on_selected, filters)`, `save_file(title, on_selected, initial_name)` (`Gtk.FileDialog`).
+- **Threads : `run_task(work, on_done, on_error)`** (dans `utils/dialogs.py`) exécute `work()` dans un thread et rappelle `on_done(résultat)` dans le thread GTK. À utiliser pour tout `pkexec`, réseau, `apt-cache`, `make` ou scan de fichiers. Ne jamais toucher un widget depuis un thread (sinon passer par `GLib.idle_add`).
+- Widgets communs : `gui/widgets.py`. On y trouve `SimpleList` (tableau `Gtk.ColumnView` : `set_rows`, `append`, `selected()` → `Row` avec `row[i]` et `row.data`), `section` (bloc titré en carte), `page_box`, `title_label`, `markup_label`, `button`, `button_row`, `labeled`, `entry`, `monospace_view`, `inner_tabs` (`Gtk.Stack` + `StackSwitcher`), `info_bar`, `clear_box` et `run_once_when_mapped`.
+- **Chargement différé** : ce qui demande le mot de passe ou est lent se lance à la première ouverture de l'onglet (`run_once_when_mapped`). C'est le cas du diagnostic SecureBoot (une seule lecture `mokutil-diagnose`, réutilisée par la liste des clés, échec compris) et du scan de nettoyage. La version stable de kernel.org est lue en arrière-plan.
+- Les onglets complexes sont des classes (`DriversPage`, `SecureBootPage`, `CleanupPage`) accessibles depuis la fenêtre (`main_window.drivers_page`…).
+- Notifications : `KernelManager.notifier` est branché par la fenêtre sur `app.notify()` (`Gio.Notification`). `core/` reste sans GTK. Il faut le `.desktop` `com.kernelcustom.manager.desktop` pour que GNOME les affiche.
+- La signature SecureBoot à la compilation est réactivée. La case est cochée par défaut si SecureBoot est actif et qu'une clé MOK existe (`find_signing_key`).
+- **Tester sans afficher de fenêtre sur la session de l'utilisateur** : `DISPLAY=:0` est la vraie session GNOME. Utiliser broadway, par exemple `gtk4-broadwayd :7 &`, puis `env -u DISPLAY GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 KCM_DATA_DIR=/tmp/x python3 kernelcustom_manager.py`. Pour une capture : `win.snapshot_child(win.get_first_child(), snapshot)` puis `get_renderer().render_texture(...)`, avec `gtk-enable-animations=False`, sinon les dialogues restent invisibles car l'animation n'avance pas sans client broadway.
 
 ## Conventions du code
 
@@ -117,16 +114,20 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - **Privilèges** : uniquement via `PkexecHelper` (voir « Opérations privilégiées »).
 - **Structure** : la logique va dans `core/` (sans GTK), l'interface dans `gui/`, les utilitaires transverses dans `utils/`.
 - **Commits** : messages en français, préfixés `Fix:`, `Feat:`, `Refactor:`, `Release:`, `Docs:`.
-- Nettoyages en cours de route : `locale.getdefaultlocale()` (déprécié depuis Python 3.11+, à remplacer par `locale.getlocale()`) et les `except:` nus à remplacer par `except Exception:`.
+- Nettoyages en cours de route : les `except:` nus restants (`core/`) sont à remplacer par `except Exception:` (fait pour `gui/`, `utils/` et `core/kernel_manager.py`).
 
-## Dette repérée (à traiter pendant le portage)
+## Dette repérée
 
-- Un appel `pkexec` (mokutil-diagnose) est lancé **au démarrage** par l'onglet SecureBoot. Il faudrait le différer jusqu'à l'ouverture de l'onglet ou une action de l'utilisateur.
-- `utils/dialogs.py` `show_question()` renvoie un **booléen** : ne jamais le comparer à `Gtk.ResponseType` (bug corrigé à l'étape 3 dans `drivers_tab.py`, où l'installation, la suppression et le rollback ne pouvaient jamais aboutir). À garder en tête pour l'API async GTK4.
-- `gui/secureboot_tab.py` contient encore de nombreux `print("[DEBUG GUI] …")` : à passer en `logging`.
-- La signature SecureBoot à la compilation (`sign_for_secureboot`) est désactivée dans l'interface (case commentée dans `show_compile_dialog`). Le runner la gère : il suffira de la réactiver lors du portage GTK4.
-- `docs/ARCHITECTURE.md` : décrit encore GTK3, Ubuntu et AMD. À réécrire à l'étape Release.
-- `install.sh` : installe `debhelper-compat` (paquet virtuel). À revoir avec `debian/control` à l'étape 8.
+- `core/driver_manager.py` et `core/secureboot_manager.py` renvoient encore des messages en dur (français ou anglais) affichés tels quels. Ils devraient renvoyer des clés i18n.
+- `docs/ARCHITECTURE.md` décrit encore GTK3, Ubuntu et AMD. À réécrire à l'étape Release.
+- `install.sh` installe `debhelper-compat` (paquet virtuel). À revoir avec `debian/control` à l'étape 8.
+- `data/icons/hicolor/scalable/…svg` n'est qu'un PNG encapsulé (3 Mo). Prévoir un vrai SVG, ou n'installer que le PNG 256×256 dans le paquet.
+- Corrigé à l'étape 7 :
+  - le `pkexec` lancé au démarrage par l'onglet SecureBoot ;
+  - `show_question()` qui renvoyait un booléen (supprimé) ;
+  - les `print("[DEBUG GUI]")` ;
+  - la signature SecureBoot désactivée à la compilation ;
+  - `locale.getdefaultlocale()`.
 
 ## Commandes utiles
 

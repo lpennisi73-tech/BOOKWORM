@@ -13,7 +13,8 @@ import os
 import shutil
 from pathlib import Path
 
-APP_ID = "kernelcustom-manager"
+APP_ID = "kernelcustom-manager"          # nom du paquet, des dossiers et du helper
+APPLICATION_ID = "com.kernelcustom.manager"  # id D-Bus / GTK (.desktop, icône, polkit)
 
 log = logging.getLogger(__name__)
 
@@ -21,8 +22,9 @@ log = logging.getLogger(__name__)
 
 APP_DIR = Path(__file__).resolve().parent.parent
 TRANSLATIONS_DIR = APP_DIR / "translations"
-ICON_PNG = APP_DIR / "icon.png"
-ICON_SVG = APP_DIR / "icon.svg"
+# Thème d'icônes local (icône com.kernelcustom.manager), utilisé depuis le dépôt git.
+# Installé, le paquet place les icônes dans /usr/share/icons/hicolor.
+ICONS_DIR = APP_DIR / "data" / "icons"
 BUILD_RUNNER = APP_DIR / "core" / "build_runner.py"
 
 # Helpers privilégiés : chemin FIXE, référencé par la policy polkit

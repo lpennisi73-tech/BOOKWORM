@@ -3,9 +3,7 @@ Module de gestion des kernels
 Logique métier pour télécharger, compiler, installer les kernels
 """
 
-import gi
-gi.require_version('Notify', '0.7')
-from gi.repository import Notify
+import logging
 import subprocess
 import shutil
 from pathlib import Path
@@ -33,6 +31,10 @@ class KernelManager:
         self.configs_dir = self.base_dir / "configs"
         self.profiles_dir = self.base_dir / "profiles"
         self.history_file = self.base_dir / "compilation_history.json"
+
+        # Notifications : fonction (title, message, urgency) fournie par l'interface
+        # (Gio.Notification). Le cœur reste sans dépendance GTK.
+        self.notifier = None
         
         # Créer tous les dossiers
         for directory in [self.repo_dir, self.log_dir, self.archive_dir, 
@@ -54,7 +56,7 @@ class KernelManager:
         try:
             with open(self.history_file, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception:
             return []
     
     def add_compilation_to_history(self, kernel_version, suffix, success, duration, packages):
@@ -144,7 +146,7 @@ class KernelManager:
                 with open(meta_file, 'r') as f:
                     profile_data = json.load(f)
                     profiles.append(profile_data)
-            except:
+            except Exception:
                 continue
         
         return sorted(profiles, key=lambda x: x['created'], reverse=True)
@@ -178,19 +180,14 @@ class KernelManager:
         return True
     
     def send_notification(self, title, message, urgency="normal"):
-        """Envoie une notification système"""
+        """Envoie une notification système (urgency : low, normal, critical)"""
+        if self.notifier is None:
+            return
         try:
-            notification = Notify.Notification.new(title, message, "dialog-information")
-            
-            if urgency == "critical":
-                notification.set_urgency(Notify.Urgency.CRITICAL)
-            elif urgency == "low":
-                notification.set_urgency(Notify.Urgency.LOW)
-            
-            notification.show()
-        except:
+            self.notifier(title, message, urgency)
+        except Exception:
             pass
-    
+
     def get_installed_kernels(self):
         """Liste les kernels installés"""
         try:
@@ -212,7 +209,7 @@ class KernelManager:
                         })
             
             return kernels
-        except:
+        except Exception:
             return []
     
     def get_local_packages(self):
@@ -262,5 +259,7 @@ class KernelManager:
             return True
             
         except Exception as e:
-            print(f"Erreur téléchargement: {e}")
+            # Erreur ou annulation (le callback de progression lève une exception)
+            logging.warning(f"Téléchargement de linux-{version} interrompu : {e}")
+            dest.unlink(missing_ok=True)  # archive partielle
             return False

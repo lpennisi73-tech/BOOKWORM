@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-KernelCustom Manager - Version Python/GTK
-Édition Professionnelle v2.3
+KernelCustom Manager - Python / GTK4 + libadwaita
 Point d'entrée principal
 """
 
 import logging
+import sys
 
 import gi
-gi.require_version('Gtk', '3.0')
-gi.require_version('Notify', '0.7')
-from gi.repository import Gtk, Notify, GLib
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from utils import paths
+
+VERSION = "3.0-dev"
 
 
 def setup_logging():
@@ -30,6 +32,54 @@ def setup_logging():
     )
 
 
+class KernelCustomApplication(Adw.Application):
+    """Application unique (une seule instance, id D-Bus com.kernelcustom.manager)"""
+
+    def __init__(self, migration_message=None):
+        super().__init__(application_id=paths.APPLICATION_ID,
+                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.migration_message = migration_message
+        self.window = None
+        GLib.set_application_name("KernelCustom Manager")
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+
+        # Icône de l'application depuis le dépôt (installée : thème hicolor du système)
+        display = Gdk.Display.get_default()
+        if display is not None and paths.ICONS_DIR.is_dir():
+            Gtk.IconTheme.get_for_display(display).add_search_path(str(paths.ICONS_DIR))
+        Gtk.Window.set_default_icon_name(paths.APPLICATION_ID)
+
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", lambda *a: self.quit())
+        self.add_action(quit_action)
+        self.set_accels_for_action("app.quit", ["<Control>q"])
+
+    def do_activate(self):
+        if self.window is None:
+            # Import après la migration (les modules utilisent paths.data_dir())
+            from gui.main_window import KernelManagerWindow
+            self.window = KernelManagerWindow(application=self, version=VERSION)
+            if self.migration_message:
+                message = self.migration_message
+                GLib.idle_add(lambda: self.window.dialogs.show_info("KernelCustom Manager", message) and False)
+        self.window.present()
+
+    def notify(self, title, message, urgency="normal"):
+        """Notification de bureau (Gio.Notification), utilisable depuis un thread"""
+        def send():
+            notification = Gio.Notification.new(title)
+            notification.set_body(message)
+            notification.set_priority({
+                "low": Gio.NotificationPriority.LOW,
+                "critical": Gio.NotificationPriority.URGENT,
+            }.get(urgency, Gio.NotificationPriority.NORMAL))
+            self.send_notification(None, notification)
+            return False
+        GLib.idle_add(send)
+
+
 def main():
     """Point d'entrée principal"""
     # Migration de ~/KernelCustomManager/build AVANT que les gestionnaires
@@ -39,39 +89,11 @@ def main():
     if migration_message:
         logging.info(migration_message)
 
-    # Import après la migration (les modules utilisent paths.data_dir())
-    from gui.main_window import KernelManagerWindow
+    logging.info(f"KernelCustom Manager {VERSION} - dossier de travail : {paths.data_dir()}")
 
-    # Définir le nom de l'application pour GNOME Shell
-    # Cela permet à GNOME de lier l'application au fichier .desktop
-    GLib.set_prgname("KernelCustom Manager")
-    GLib.set_application_name("KernelCustom Manager")
-
-    print("KernelCustom Manager - Version Python/GTK")
-    print("Édition Professionnelle v2.3")
-    print("=" * 50)
-    print(f"📁 Dossier de travail : {paths.data_dir()}")
-
-    # Initialiser les notifications
-    try:
-        Notify.init("KernelCustom Manager")
-        print("✓ Notifications activées")
-    except Exception:
-        print("⚠️  Notifications désactivées (installez gir1.2-notify-0.7)")
-
-    # Créer et afficher la fenêtre
-    win = KernelManagerWindow()
-    win.connect("destroy", Gtk.main_quit)
-    win.show_all()
-
-    if migration_message:
-        def show_migration():
-            win.dialogs.show_info("KernelCustom Manager", migration_message)
-            return False
-        GLib.idle_add(show_migration)
-
-    Gtk.main()
+    app = KernelCustomApplication(migration_message)
+    return app.run(sys.argv)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

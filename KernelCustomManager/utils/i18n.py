@@ -24,12 +24,12 @@ class I18n:
         """Detect system language"""
         try:
             # Try to get system locale
-            system_locale = locale.getdefaultlocale()[0]
+            system_locale = locale.getlocale()[0]
             if system_locale:
                 lang = system_locale.split('_')[0].lower()
                 # Support only French and English for now
                 return 'fr' if lang == 'fr' else 'en'
-        except:
+        except Exception:
             pass
 
         # Check environment variable
@@ -43,7 +43,6 @@ class I18n:
     def load_translations(self):
         """Load translation files"""
         translations_dir = paths.TRANSLATIONS_DIR
-        translations_dir.mkdir(exist_ok=True)
 
         for lang_file in translations_dir.glob("*.json"):
             lang_code = lang_file.stem
@@ -59,7 +58,7 @@ class I18n:
             if self.config_file.exists():
                 with open(self.config_file, 'r') as f:
                     return f.read().strip()
-        except:
+        except Exception:
             pass
         return None
 
@@ -68,7 +67,7 @@ class I18n:
         try:
             with open(self.config_file, 'w') as f:
                 f.write(lang_code)
-        except:
+        except Exception:
             pass
 
     def set_language(self, lang_code):
