@@ -25,7 +25,7 @@ class SimpleList(Gtk.ScrolledWindow):
     Tableau de texte (Gtk.ColumnView + Gio.ListStore), remplace TreeView + ListStore.
 
         lst = SimpleList(["Paquet", "Taille"], expand=[0])
-        lst.append(["linux-image…", "80 Mo"], data=chemin)
+        lst.append(["linux-image…", "80 MB"], data=chemin)
         row = lst.selected()   # Row ou None ; row[0], row.data
     """
 

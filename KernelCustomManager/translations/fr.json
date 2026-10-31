@@ -78,7 +78,12 @@
       "invalid_version": "Version invalide",
       "invalid_suffix": "Suffixe invalide : utilisez uniquement des lettres, chiffres et les caractères . _ + ~ - (ex : -kernelcustom)",
       "make_missing": "make est introuvable : installez build-essential (sudo apt install build-essential).",
-      "invalid_profile_name": "Le nom « {name} » contient des caractères non autorisés.\n\nCaractères acceptés : lettres, chiffres, espace, point, tiret (-), plus (+) et souligné (_). Le nom doit commencer par une lettre ou un chiffre (64 caractères au maximum)."
+      "invalid_profile_name": "Le nom « {name} » contient des caractères non autorisés.\n\nCaractères acceptés : lettres, chiffres, espace, point, tiret (-), plus (+) et souligné (_). Le nom doit commencer par une lettre ou un chiffre (64 caractères au maximum).",
+      "helper_not_installed": "Le helper privilégié n'est pas installé ({path}). Installez le paquet kernelcustom-manager.",
+      "auth_cancelled": "Authentification annulée",
+      "auth_denied": "Authentification refusée",
+      "helper_failed": "Échec (code {code})",
+      "timeout": "Délai dépassé"
     },
     "confirm": {
       "title": "Confirmer",
@@ -249,7 +254,9 @@
     "column_active": "Lien actif",
     "button_copy": "📥 Copier dans /usr/src/",
     "button_link_simple": "🔗 Lien symbolique simple",
-    "button_link_suffix": "🔗 Lien avec suffixe (DKMS)"
+    "button_link_suffix": "🔗 Lien avec suffixe (DKMS)",
+    "not_found": "Sources introuvables pour {version} dans {dir}",
+    "headers_missing": "Headers linux-headers-{version} introuvables : seuls les liens des sources ont été créés"
   },
   "build": {
     "version_label": "Version du kernel:"
@@ -409,7 +416,13 @@
   },
   "misc": {
     "impossible": "Impossible",
-    "menuconfig_prompt": "Appuyez sur Entrée..."
+    "menuconfig_prompt": "Appuyez sur Entrée...",
+    "migration": {
+      "moved": "Dossier de travail déplacé : {old} → {new}",
+      "links_updated": "{count} lien(s) symbolique(s) mis à jour.",
+      "compat_link": "Des liens de /usr/src pointent encore vers l'ancien dossier ({links}) : un lien de compatibilité {old} → {new} a été créé. Recréez ces liens depuis l'onglet Sources pour pouvoir le supprimer."
+    },
+    "size_units": "o Ko Mo Go"
   },
   "secureboot": {
     "tab_status": "🔒 Statut",
@@ -574,7 +587,52 @@
     "diag_on_open": "Le diagnostic démarre à l'ouverture de cet onglet (le mot de passe administrateur peut être demandé pour lire les clés MOK).",
     "importing": "Import de la clé en cours",
     "regenerating_initrd": "Régénération de l'initrd de {version}…\n⚙️ Nécessaire pour que SecureBoot fonctionne",
-    "signature_issues": "Problèmes de signature détectés :"
+    "signature_issues": "Problèmes de signature détectés :",
+    "msg": {
+      "not_uefi": "Le système n'utilise pas UEFI",
+      "sb_enabled": "SecureBoot est activé",
+      "sb_disabled": "SecureBoot est désactivé",
+      "sb_enabled_bootctl": "SecureBoot est activé (d'après bootctl)",
+      "sb_disabled_bootctl": "SecureBoot est désactivé (d'après bootctl)",
+      "sb_unknown": "Impossible de déterminer l'état de SecureBoot",
+      "mok_key_missing": "Clé MOK introuvable. Générez d'abord une clé.",
+      "mok_imported": "Clé MOK importée. Un redémarrage est nécessaire.",
+      "mok_import_failed": "Échec de l'import de la clé MOK : {error}",
+      "error": "Erreur : {error}",
+      "mok_fetch_failed": "Impossible de lire les clés MOK",
+      "no_pending": "Aucune clé en attente",
+      "key_file_not_found": "Fichier de clé introuvable : {path}",
+      "import_started": "Import de la clé lancé. Redémarrez pour terminer l'enrôlement.",
+      "delete_started": "Suppression de la clé lancée. Redémarrez pour terminer.",
+      "reset_started": "Réinitialisation des clés MOK lancée. Un redémarrage est nécessaire.",
+      "mokutil_missing": "mokutil n'est pas installé",
+      "key_generated": "Paire de clés générée",
+      "key_generation_failed": "Échec de la génération de la clé : {error}",
+      "openssl_missing": "openssl n'est pas installé",
+      "module_not_found": "Module introuvable",
+      "private_key_not_found": "Clé privée introuvable",
+      "certificate_not_found": "Certificat introuvable",
+      "sign_file_missing": "Outil sign-file introuvable",
+      "module_signed": "Module signé : {name}",
+      "unknown_error": "Erreur inconnue",
+      "not_signed": "Non signé",
+      "modinfo_missing": "La commande modinfo est introuvable",
+      "mok_keys_missing": "Clés MOK introuvables",
+      "kernel_dir_not_found": "Dossier du kernel introuvable : {path}",
+      "sign_summary": "{signed}/{total} modules signés",
+      "sign_summary_vmlinuz": "vmlinuz : {status}",
+      "sign_summary_initrd_ok": "initrd : ✅ régénéré",
+      "sign_summary_initrd_failed": "initrd : ❌ échec"
+    },
+    "history_action": {
+      "enroll_mok": "Enrôlement de la clé MOK",
+      "import_key": "Import d'une clé",
+      "delete_key": "Suppression d'une clé",
+      "reset_keys": "Réinitialisation des clés MOK",
+      "generate_key": "Génération d'une clé",
+      "sign_module": "Signature d'un module",
+      "sign_kernel": "Signature d'un kernel"
+    }
   },
   "cleanup": {
     "title": "🧹 Nettoyage du dossier de travail",
@@ -607,7 +665,19 @@
       "installed_kernel": "Kernel installé (copie du paquet)",
       "secureboot_keys": "Nécessaire pour signer les kernels"
     },
-    "empty": "Rien à nettoyer"
+    "empty": "Rien à nettoyer",
+    "error": {
+      "gone": "n'existe plus",
+      "outside": "hors du dossier de travail",
+      "workdir": "refus de supprimer le dossier de travail",
+      "keys": "clés SecureBoot : utilisez la catégorie dédiée",
+      "protected": "protégé ({reason})",
+      "make_failed": "make clean a échoué"
+    },
+    "cli_description": "Inventaire du dossier de travail KernelCustom Manager",
+    "cli_keys": "inclure les clés SecureBoot",
+    "cli_workdir": "Dossier de travail : {path}",
+    "cli_total": "Sélection par défaut : {size} libérables"
   },
   "about": {
     "comments": "Compilation et gestion de kernels Linux personnalisés pour Debian : paquets, sources, pilotes GPU et SecureBoot."

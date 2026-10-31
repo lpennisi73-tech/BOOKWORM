@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from utils import paths
+from utils.i18n import _ as tr, format_size
 
 log = logging.getLogger(__name__)
 
@@ -74,11 +75,8 @@ class CleanupItem:
 # ==================== Utilitaires ====================
 
 def human_size(size):
-    """Taille lisible (ex: 1.4 Go). Unités françaises."""
-    for unit in ('o', 'Ko', 'Mo', 'Go'):
-        if size < 1024 or unit == 'Go':
-            return f"{size:.0f} {unit}" if unit == 'o' else f"{size:.1f} {unit}"
-        size /= 1024
+    """Taille lisible dans la langue courante (ex : 1.4 Go / 1.4 GB)"""
+    return format_size(size)
 
 
 def tree_size(path, predicate=None):
@@ -283,22 +281,22 @@ class CleanupManager:
         """Revalidation juste avant l'action (l'état a pu changer depuis scan())"""
         path = item.path
         if not path.exists() and not path.is_symlink():
-            raise ValueError("n'existe plus")
+            raise ValueError(tr("cleanup.error.gone"))
         # Le chemin lui-même (sans suivre un éventuel lien final) doit être dans le dossier de travail
         parent = _realpath(path.parent)
         base = _realpath(self.base_dir)
         if not _contains(base, parent) or path.name in ("", ".", ".."):
-            raise ValueError("hors du dossier de travail")
+            raise ValueError(tr("cleanup.error.outside"))
         if _realpath(path) == base:
-            raise ValueError("refus de supprimer le dossier de travail")
+            raise ValueError(tr("cleanup.error.workdir"))
         if item.category == 'secureboot_keys':
             return  # demandé explicitement par l'utilisateur
         if _contains(_realpath(self.keys_dir), _realpath(path)):
-            raise ValueError("clés SecureBoot : utilisez la catégorie dédiée")
+            raise ValueError(tr("cleanup.error.keys"))
         if item.action == 'delete':
             protected, reason = self.protection(path, link_targets)
             if protected:
-                raise ValueError(f"protégé ({reason})")
+                raise ValueError(tr("cleanup.error.protected", reason=tr(f"cleanup.reason.{reason}")))
 
     def clean(self, items, progress_callback=None):
         """
@@ -321,7 +319,7 @@ class CleanupManager:
                     result = subprocess.run(["make", "clean"], cwd=item.path,
                                             capture_output=True, text=True)
                     if result.returncode != 0:
-                        raise RuntimeError(result.stderr.strip()[-500:] or "make clean a échoué")
+                        raise RuntimeError(result.stderr.strip()[-500:] or tr("cleanup.error.make_failed"))
                     freed += max(before - tree_size(item.path, _is_build_output), 0)
                 else:
                     size = tree_size(item.path)
@@ -337,7 +335,7 @@ class CleanupManager:
                 done.append(item)
                 log.info(f"Nettoyage: {item.category} {item.path}")
             except FileNotFoundError as e:
-                errors.append((item, "make introuvable (installez build-essential)" if item.action == 'make_clean' else str(e)))
+                errors.append((item, tr("message.error.make_missing") if item.action == 'make_clean' else str(e)))
             except (OSError, ValueError, RuntimeError) as e:
                 errors.append((item, str(e)))
                 log.warning(f"Nettoyage impossible {item.path}: {e}")
@@ -349,19 +347,19 @@ class CleanupManager:
 
 def main(argv=None):
     import argparse
-    parser = argparse.ArgumentParser(description="Inventaire du dossier de travail KernelCustom Manager")
-    parser.add_argument("--keys", action="store_true", help="inclure les clés SecureBoot")
+    parser = argparse.ArgumentParser(description=tr("cleanup.cli_description"))
+    parser.add_argument("--keys", action="store_true", help=tr("cleanup.cli_keys"))
     args = parser.parse_args(argv)
 
     manager = CleanupManager()
     items = manager.scan(include_keys=args.keys)
-    print(f"Dossier de travail : {manager.base_dir}\n")
+    print(tr("cleanup.cli_workdir", path=manager.base_dir) + "\n")
     for item in items:
         flags = "🔒" if item.protected else ("☑" if item.selected else "☐")
         reason = f"  ({item.reason})" if item.reason else ""
         print(f"{flags} {item.category:<17} {human_size(item.size):>10}  {item.name}{reason}")
     total = sum(size for _, size in CleanupManager.summary([i for i in items if i.selected]).values())
-    print(f"\nSélection par défaut : {human_size(total)} libérables")
+    print("\n" + tr("cleanup.cli_total", size=human_size(total)))
 
 
 if __name__ == "__main__":

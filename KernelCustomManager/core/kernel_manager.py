@@ -10,6 +10,7 @@ import shutil
 from pathlib import Path
 
 from utils import paths
+from utils.i18n import format_size
 from datetime import datetime
 import json
 
@@ -235,11 +236,10 @@ class KernelManager:
         """Liste les paquets .deb locaux"""
         packages = []
         for deb_file in self.repo_dir.glob("linux-image-*.deb"):
-            size = deb_file.stat().st_size / (1024 * 1024)
             packages.append({
                 'name': deb_file.name,
                 'path': deb_file,
-                'size': f"{size:.1f} Mo"
+                'size': format_size(deb_file.stat().st_size)
             })
         return packages
     

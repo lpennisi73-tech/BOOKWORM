@@ -118,6 +118,10 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 ## Conventions du code
 
 - **Langue** : code et commentaires en français (existant). **Tout texte affiché à l'utilisateur passe par `utils/i18n.py`**. Ajouter chaque clé dans `translations/fr.json` ET `translations/en.json`.
+  - Dans `core/` et `utils/` : `from utils.i18n import _ as tr` (pas `_`, souvent utilisé comme variable jetable : `ok, _, err = …`). Dans `utils/paths.py`, importer `i18n` **dans la fonction**, car `i18n` importe `paths`.
+  - Ne **jamais** traduire les motifs qui lisent la sortie d'une commande (`MokListRT is empty`, `SHA1 Fingerprint:`, `VGA compatible controller`…) ni le sujet du certificat MOK. Les messages qui ne vont que dans le journal restent en anglais.
+  - Tailles : `format_size()` (`utils/i18n.py`, unités `misc.size_units`).
+  - Historique SecureBoot : on enregistre un **identifiant d'action** (`enroll_mok`, `sign_kernel`…), traduit à l'affichage (`secureboot.history_action.*`). Les anciennes entrées (phrases) sont affichées telles quelles.
 - **Privilèges** : uniquement via `PkexecHelper` (voir « Opérations privilégiées »).
 - **Structure** : la logique va dans `core/` (sans GTK), l'interface dans `gui/`, les utilitaires transverses dans `utils/`.
 - **Commits** : messages en français, préfixés `Fix:`, `Feat:`, `Refactor:`, `Release:`, `Docs:`.
@@ -125,7 +129,6 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 
 ## Dette repérée
 
-- `core/driver_manager.py` et `core/secureboot_manager.py` renvoient encore des messages en dur (français ou anglais) affichés tels quels. Ils devraient renvoyer des clés i18n.
 - `data/icons/hicolor/scalable/…svg` n'est qu'un PNG encapsulé (3 Mo) : le paquet n'installe que le PNG 256×256. Prévoir un vrai SVG.
 - Corrigé à l'étape 7 :
   - le `pkexec` lancé au démarrage par l'onglet SecureBoot ;

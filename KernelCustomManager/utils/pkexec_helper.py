@@ -12,6 +12,7 @@ ni avec `bash -c` ou `shell=True`.
 import subprocess
 from pathlib import Path
 
+from utils.i18n import _ as tr
 from utils.paths import HELPER_DIR
 
 
@@ -26,10 +27,10 @@ class PkexecHelper:
     HELPER_PATH = str(HELPER_DIR / "kernelcustom-helper")
     NVIDIA_INSTALLER_PATH = str(HELPER_DIR / "kernelcustom-nvidia-installer")
 
-    NOT_INSTALLED_MSG = (
-        "Le helper privilégié n'est pas installé "
-        f"({HELPER_DIR}). Installez le paquet kernelcustom-manager."
-    )
+    @staticmethod
+    def not_installed_message():
+        # Méthode (et non attribut de classe) : la langue n'est pas encore chargée à l'import
+        return tr("message.error.helper_not_installed", path=HELPER_DIR)
 
     # ---------- Bas niveau ----------
 
@@ -45,10 +46,10 @@ class PkexecHelper:
     @staticmethod
     def _error_message(returncode, stderr):
         if returncode == PKEXEC_DISMISSED:
-            return "Authentification annulée"
+            return tr("message.error.auth_cancelled")
         if returncode == PKEXEC_NOT_AUTHORIZED:
-            return "Authentification refusée"
-        return (stderr or "").strip() or f"Échec (code {returncode})"
+            return tr("message.error.auth_denied")
+        return (stderr or "").strip() or tr("message.error.helper_failed", code=returncode)
 
     @staticmethod
     def run(action, *args, program=None, input=None, timeout=None):
@@ -58,14 +59,14 @@ class PkexecHelper:
         """
         program = program or PkexecHelper.HELPER_PATH
         if not Path(program).is_file():
-            return False, "", PkexecHelper.NOT_INSTALLED_MSG
+            return False, "", PkexecHelper.not_installed_message()
         try:
             result = subprocess.run(
                 PkexecHelper.command(action, *args, program=program),
                 capture_output=True, text=True, input=input, timeout=timeout
             )
         except subprocess.TimeoutExpired:
-            return False, "", "Délai dépassé"
+            return False, "", tr("message.error.timeout")
         if result.returncode == 0:
             return True, result.stdout, ""
         return False, result.stdout, PkexecHelper._error_message(result.returncode, result.stderr)
@@ -79,7 +80,7 @@ class PkexecHelper:
         """
         program = program or PkexecHelper.HELPER_PATH
         if not Path(program).is_file():
-            return False, [], PkexecHelper.NOT_INSTALLED_MSG
+            return False, [], PkexecHelper.not_installed_message()
         process = subprocess.Popen(
             PkexecHelper.command(action, *args, program=program),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1

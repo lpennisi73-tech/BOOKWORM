@@ -124,3 +124,14 @@ def get_i18n():
 def _(key, /, **kwargs):
     """Shortcut for translation"""
     return get_i18n()._(key, **kwargs)
+
+
+def format_size(size):
+    """Taille lisible dans la langue courante (ex : 1.4 Go / 1.4 GB)"""
+    units = get_i18n()._("misc.size_units").split()
+    if len(units) != 4:
+        units = ["B", "KB", "MB", "GB"]
+    for index, unit in enumerate(units):
+        if size < 1024 or index == len(units) - 1:
+            return f"{size:.0f} {unit}" if index == 0 else f"{size:.1f} {unit}"
+        size /= 1024

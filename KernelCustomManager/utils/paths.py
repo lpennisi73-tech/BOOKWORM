@@ -137,20 +137,19 @@ def migrate_legacy_data():
     except OSError:
         shutil.move(str(old), new)   # sinon copie + suppression
 
+    # Import tardif : utils.i18n importe ce module
+    from utils.i18n import _ as tr
+
     rewritten = _rewrite_symlinks(new, old, new)
-    message = f"Dossier de travail déplacé : {old} → {new}"
+    message = tr("misc.migration.moved", old=old, new=new)
     if rewritten:
-        message += f"\n{rewritten} lien(s) symbolique(s) mis à jour."
+        message += "\n" + tr("misc.migration.links_updated", count=rewritten)
 
     dkms_links = _usr_src_links_into(old)
     if dkms_links:
         old.symlink_to(new)
-        message += (
-            f"\nDes liens de /usr/src pointent encore vers l'ancien dossier "
-            f"({', '.join(l.name for l in dkms_links)}) : un lien de compatibilité "
-            f"{old} → {new} a été créé. Recréez ces liens depuis l'onglet Sources "
-            f"pour pouvoir le supprimer."
-        )
+        message += "\n" + tr("misc.migration.compat_link", links=", ".join(l.name for l in dkms_links),
+                               old=old, new=new)
     else:
         try:
             old.parent.rmdir()  # ~/KernelCustomManager s'il est vide

@@ -650,7 +650,13 @@ class SecureBootPage:
         text = f"{i18n._('secureboot.history_count')}: {len(history)}\n\n"
         for item in history:
             timestamp = datetime.fromisoformat(item['timestamp']).strftime("%Y-%m-%d %H:%M:%S")
-            text += f"{'✅' if item['success'] else '❌'} [{timestamp}] {item['action']}\n"
+            # Action enregistrée sous forme d'identifiant (enroll_mok, sign_kernel…), traduite ici ;
+            # les anciennes entrées contiennent une phrase, affichée telle quelle
+            action_key = f"secureboot.history_action.{item['action']}"
+            action = i18n._(action_key)
+            if action == action_key:
+                action = item['action']
+            text += f"{'✅' if item['success'] else '❌'} [{timestamp}] {action}\n"
             if isinstance(item['details'], dict):
                 for key, value in item['details'].items():
                     text += f"   {key}: {value}\n"

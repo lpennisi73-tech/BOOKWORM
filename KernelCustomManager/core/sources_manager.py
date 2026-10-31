@@ -9,6 +9,7 @@ sources-link et sources-remove), qui revalide tous les chemins.
 import os
 from pathlib import Path
 
+from utils.i18n import _ as tr
 from utils.pkexec_helper import PkexecHelper
 
 USR_SRC = Path("/usr/src")
@@ -84,7 +85,7 @@ class SourcesManager:
         """Copie les sources (et les headers s'ils existent) dans /usr/src"""
         src = self.find_source_dir(version)
         if not src:
-            return False, f"Sources introuvables pour {version} dans {self.sources_dir}"
+            return False, tr("sources.not_found", version=version, dir=self.sources_dir)
         args = [src]
         headers = self.find_headers_dir(src.name.removeprefix("linux-"), src)
         if headers:
@@ -99,7 +100,7 @@ class SourcesManager:
         """
         src = self.find_source_dir(base_version)
         if not src:
-            return False, f"Sources introuvables pour {base_version} dans {self.sources_dir}"
+            return False, tr("sources.not_found", version=base_version, dir=self.sources_dir)
         full_version = full_version or base_version
         args = [src, full_version]
         headers = self.find_headers_dir(full_version, src)
@@ -107,7 +108,7 @@ class SourcesManager:
             args += ["--headers", headers]
         success, stdout, error = PkexecHelper.run("sources-link", *args)
         if success and "HEADERS_MISSING:" in stdout:
-            return True, f"Headers linux-headers-{full_version} introuvables : seuls les liens des sources ont été créés"
+            return True, tr("sources.headers_missing", version=full_version)
         return success, error
 
     @staticmethod

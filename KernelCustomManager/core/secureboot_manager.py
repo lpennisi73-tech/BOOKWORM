@@ -109,7 +109,7 @@ class SecureBootManager:
             return {
                 'enabled': False,
                 'setup_mode': False,
-                'details': 'System is not using UEFI',
+                'details': self.i18n._('secureboot.msg.not_uefi'),
                 'error': 'NOT_UEFI'
             }
 
@@ -133,10 +133,10 @@ class SecureBootManager:
                 output = result.stdout.strip()
                 if "SecureBoot enabled" in output:
                     status['enabled'] = True
-                    status['details'] = "SecureBoot is enabled"
+                    status['details'] = self.i18n._('secureboot.msg.sb_enabled')
                 elif "SecureBoot disabled" in output:
                     status['enabled'] = False
-                    status['details'] = "SecureBoot is disabled"
+                    status['details'] = self.i18n._('secureboot.msg.sb_disabled')
                 else:
                     status['details'] = output
 
@@ -156,7 +156,7 @@ class SecureBootManager:
                     if len(data) > 0:
                         sb_value = data[-1]
                         status['enabled'] = (sb_value == 1)
-                        status['details'] = f"SecureBoot is {'enabled' if status['enabled'] else 'disabled'}"
+                        status['details'] = self.i18n._('secureboot.msg.sb_enabled' if status['enabled'] else 'secureboot.msg.sb_disabled')
                         return status
         except (FileNotFoundError, PermissionError):
             pass
@@ -175,15 +175,15 @@ class SecureBootManager:
                     if 'Secure Boot' in line:
                         if 'enabled' in line.lower():
                             status['enabled'] = True
-                            status['details'] = "SecureBoot is enabled (via bootctl)"
+                            status['details'] = self.i18n._('secureboot.msg.sb_enabled_bootctl')
                         else:
                             status['enabled'] = False
-                            status['details'] = "SecureBoot is disabled (via bootctl)"
+                            status['details'] = self.i18n._('secureboot.msg.sb_disabled_bootctl')
                         return status
         except FileNotFoundError:
             pass
 
-        status['details'] = "Unable to determine SecureBoot status"
+        status['details'] = self.i18n._('secureboot.msg.sb_unknown')
         status['error'] = "UNABLE_TO_DETECT"
         return status
 
@@ -401,7 +401,7 @@ class SecureBootManager:
         if not mok_key.exists():
             return {
                 'success': False,
-                'message': 'MOK key not found. Generate a key first.',
+                'message': self.i18n._('secureboot.msg.mok_key_missing'),
                 'needs_reboot': False
             }
 
@@ -410,28 +410,24 @@ class SecureBootManager:
             success, _, error_msg = PkexecHelper.mokutil_import(mok_key, password=password)
 
             if success:
-                self.add_to_history(
-                    "MOK Enrollment",
-                    "MOK key imported, awaiting reboot",
-                    success=True
-                )
+                self.add_to_history('enroll_mok', {'key': str(mok_key)}, success=True)
 
                 return {
                     'success': True,
-                    'message': 'MOK key imported successfully. Reboot required.',
+                    'message': self.i18n._('secureboot.msg.mok_imported'),
                     'needs_reboot': True
                 }
             else:
                 return {
                     'success': False,
-                    'message': f'Failed to import MOK key: {error_msg}',
+                    'message': self.i18n._('secureboot.msg.mok_import_failed', error=error_msg),
                     'needs_reboot': False
                 }
 
         except Exception as e:
             return {
                 'success': False,
-                'message': f'Error: {str(e)}',
+                'message': self.i18n._('secureboot.msg.error', error=e),
                 'needs_reboot': False
             }
 
@@ -448,7 +444,7 @@ class SecureBootManager:
                 keys = self._parse_mok_list(output)
                 return {'success': True, 'keys': keys, 'raw_output': output}
             else:
-                return {'success': False, 'error': mok_data.get('error') or 'Unable to fetch MOK data', 'keys': []}
+                return {'success': False, 'error': mok_data.get('error') or self.i18n._('secureboot.msg.mok_fetch_failed'), 'keys': []}
         except Exception as e:
             return {'success': False, 'error': str(e), 'keys': []}
 
@@ -486,7 +482,7 @@ class SecureBootManager:
             output = mok_data['pending_output']
 
             if "MokNew is empty" in output or not output:
-                return {'success': True, 'keys': [], 'message': 'No pending keys'}
+                return {'success': True, 'keys': [], 'message': self.i18n._('secureboot.msg.no_pending')}
             else:
                 keys = self._parse_mok_list(output)
                 return {'success': True, 'keys': keys, 'raw_output': output}
@@ -501,7 +497,7 @@ class SecureBootManager:
         key_path = Path(key_file)
 
         if not key_path.exists():
-            return {'success': False, 'error': f'Key file not found: {key_file}'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.key_file_not_found', path=key_file)}
 
         try:
             # mokutil --import demande un mot de passe interactivement
@@ -516,13 +512,13 @@ class SecureBootManager:
                 )
                 return {
                     'success': True,
-                    'message': 'Key import initiated. Reboot required to complete enrollment.',
+                    'message': self.i18n._('secureboot.msg.import_started'),
                     'output': stdout
                 }
             else:
                 return {'success': False, 'error': error}
         except FileNotFoundError:
-            return {'success': False, 'error': 'mokutil is not installed'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.mokutil_missing')}
 
     def delete_mok_key(self, key_file):
         """
@@ -531,7 +527,7 @@ class SecureBootManager:
         key_path = Path(key_file)
 
         if not key_path.exists():
-            return {'success': False, 'error': f'Key file not found: {key_file}'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.key_file_not_found', path=key_file)}
 
         try:
             success, stdout, error = PkexecHelper.mokutil_delete(key_path)
@@ -544,13 +540,13 @@ class SecureBootManager:
                 )
                 return {
                     'success': True,
-                    'message': 'Key deletion initiated. Reboot required to complete.',
+                    'message': self.i18n._('secureboot.msg.delete_started'),
                     'output': stdout
                 }
             else:
                 return {'success': False, 'error': error}
         except FileNotFoundError:
-            return {'success': False, 'error': 'mokutil is not installed'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.mokutil_missing')}
 
     def reset_mok_keys(self):
         """Réinitialise toutes les clés MOK"""
@@ -561,13 +557,13 @@ class SecureBootManager:
                 self.add_to_history('reset_keys', {'output': stdout}, success=True)
                 return {
                     'success': True,
-                    'message': 'MOK reset initiated. Reboot required.',
+                    'message': self.i18n._('secureboot.msg.reset_started'),
                     'output': stdout
                 }
             else:
                 return {'success': False, 'error': error}
         except FileNotFoundError:
-            return {'success': False, 'error': 'mokutil is not installed'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.mokutil_missing')}
 
     # ==================== Génération de clés ====================
 
@@ -623,18 +619,18 @@ class SecureBootManager:
                 'priv_key': priv_key,
                 'der_cert': der_cert,
                 'pem_cert': pem_cert,
-                'message': f'Key pair generated successfully'
+                'message': self.i18n._('secureboot.msg.key_generated')
             }
 
         except subprocess.CalledProcessError as e:
             return {
                 'success': False,
-                'error': f'Failed to generate key: {e.stderr.decode() if e.stderr else str(e)}'
+                'error': self.i18n._('secureboot.msg.key_generation_failed', error=e.stderr.decode() if e.stderr else e)
             }
         except FileNotFoundError:
             return {
                 'success': False,
-                'error': 'openssl is not installed'
+                'error': self.i18n._('secureboot.msg.openssl_missing')
             }
 
     def sign_kernel_module(self, module_path, priv_key_path, cert_path):
@@ -646,17 +642,17 @@ class SecureBootManager:
         cert = Path(cert_path)
 
         if not module.exists():
-            return {'success': False, 'error': 'Module file not found'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.module_not_found')}
         if not priv_key.exists():
-            return {'success': False, 'error': 'Private key not found'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.private_key_not_found')}
         if not cert.exists():
-            return {'success': False, 'error': 'Certificate not found'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.certificate_not_found')}
 
         try:
             # Chercher l'outil de signature du kernel
             sign_file = self._find_sign_file_tool()
             if not sign_file:
-                return {'success': False, 'error': 'sign-file tool not found'}
+                return {'success': False, 'error': self.i18n._('secureboot.msg.sign_file_missing')}
 
             # Signer le module
             result = subprocess.run([
@@ -675,12 +671,12 @@ class SecureBootManager:
                 )
                 return {
                     'success': True,
-                    'message': f'Module signed successfully: {module.name}'
+                    'message': self.i18n._('secureboot.msg.module_signed', name=module.name)
                 }
             else:
                 return {
                     'success': False,
-                    'error': result.stderr if result.stderr else 'Unknown error'
+                    'error': result.stderr if result.stderr else self.i18n._('secureboot.msg.unknown_error')
                 }
 
         except Exception as e:
@@ -724,7 +720,7 @@ class SecureBootManager:
         module = Path(module_path)
 
         if not module.exists():
-            return {'success': False, 'error': 'Module file not found'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.module_not_found')}
 
         try:
             result = subprocess.run(
@@ -747,12 +743,12 @@ class SecureBootManager:
             return {
                 'success': True,
                 'signed': has_signature,
-                'signature_info': result.stdout.strip() if has_signature else 'Not signed',
+                'signature_info': result.stdout.strip() if has_signature else self.i18n._('secureboot.msg.not_signed'),
                 'module_info': info_result.stdout
             }
 
         except FileNotFoundError:
-            return {'success': False, 'error': 'modinfo command not found'}
+            return {'success': False, 'error': self.i18n._('secureboot.msg.modinfo_missing')}
 
     # ==================== Utilitaires ====================
 
@@ -1355,7 +1351,7 @@ class SecureBootManager:
         if not mok_priv.exists() or not mok_cert_der.exists():
             return {
                 'success': False,
-                'message': 'MOK keys not found',
+                'message': self.i18n._('secureboot.msg.mok_keys_missing'),
                 'modules_signed': 0,
                 'modules_failed': 0,
                 'vmlinuz_signed': False
@@ -1366,7 +1362,7 @@ class SecureBootManager:
         if not sign_file:
             return {
                 'success': False,
-                'message': 'sign-file tool not found',
+                'message': self.i18n._('secureboot.msg.sign_file_missing'),
                 'modules_signed': 0,
                 'modules_failed': 0,
                 'vmlinuz_signed': False
@@ -1377,7 +1373,7 @@ class SecureBootManager:
         if not kernel_dir.exists():
             return {
                 'success': False,
-                'message': f'Kernel directory not found: {kernel_dir}',
+                'message': self.i18n._('secureboot.msg.kernel_dir_not_found', path=kernel_dir),
                 'modules_signed': 0,
                 'modules_failed': 0,
                 'vmlinuz_signed': False
@@ -1463,15 +1459,19 @@ class SecureBootManager:
         logging.info(f"Complete signing finished: modules={modules_signed}/{total_modules}, vmlinuz={vmlinuz_signed}, initrd={initrd_updated}")
 
         self.add_to_history(
-            "Complete Kernel Signing",
-            f"Kernel {kernel_version}: {modules_signed} modules signed, vmlinuz={'✅' if vmlinuz_signed else '❌'}, initrd={'✅' if initrd_updated else '❌'}",
+            'sign_kernel',
+            {'kernel': kernel_version, 'modules_signed': f"{modules_signed}/{total_modules}",
+             'vmlinuz': '✅' if vmlinuz_signed else ('❌' if sign_vmlinuz_flag else '—'),
+             'initrd': '✅' if initrd_updated else '❌'},
             success=success
         )
 
-        message = f'Signed {modules_signed}/{total_modules} modules'
+        parts = [self.i18n._('secureboot.msg.sign_summary', signed=modules_signed, total=total_modules)]
         if sign_vmlinuz_flag:
-            message += f', vmlinuz: {"✅" if vmlinuz_signed else "❌"}'
-        message += f', initrd: {"✅ regenerated" if initrd_updated else "❌ failed"}'
+            parts.append(self.i18n._('secureboot.msg.sign_summary_vmlinuz', status='✅' if vmlinuz_signed else '❌'))
+        parts.append(self.i18n._('secureboot.msg.sign_summary_initrd_ok' if initrd_updated
+                                 else 'secureboot.msg.sign_summary_initrd_failed'))
+        message = ', '.join(parts)
 
         return {
             'success': success,
