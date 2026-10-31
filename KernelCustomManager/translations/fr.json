@@ -72,7 +72,8 @@
       "profile_load_failed": "Impossible de charger le profil",
       "profile_delete_failed": "Impossible de supprimer:\n{error}",
       "select_version": "Veuillez sélectionner une version",
-      "invalid_version": "Version invalide"
+      "invalid_version": "Version invalide",
+      "invalid_suffix": "Suffixe invalide : utilisez uniquement des lettres, chiffres et les caractères . _ + ~ - (ex : -kernelcustom)"
     },
     "confirm": {
       "title": "Confirmer",
@@ -479,6 +480,8 @@
       "mok_pending": "La clé MOK est en attente d'enrollment. Redémarrage requis.",
       "sol_reboot_mok": "Redémarrer et suivre les instructions du MOK Manager",
       "sol_cancel_reenroll": "Annuler l'enrollment en attente et réenroller",
+      "mok_manager_missing": "⚠️ MOK Manager (mmx64.efi) est introuvable sur la partition EFI : l'écran d'enrôlement ne pourra pas s'afficher au redémarrage.",
+      "sol_reinstall_shim": "Réinstaller shim : sudo apt reinstall shim-signed",
       "mok_not_enrolled": "La clé MOK n'est pas enrollée. Impossible de booter les kernels custom.",
       "sol_enroll_mok": "Enroller la clé MOK (assistant automatisé disponible)",
       "sol_disable_sb": "Désactiver SecureBoot pour booter sans signature",

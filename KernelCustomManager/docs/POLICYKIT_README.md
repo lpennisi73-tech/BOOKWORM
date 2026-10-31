@@ -17,8 +17,12 @@ passent par **deux programmes Python** installés en `root:root` dans
 | `install-debs FICHIER.deb…` | fichiers appartenant à l'utilisateur, paquets `linux-image*`, `linux-headers*`, `linux-libc-dev*` uniquement |
 | `remove-packages [--autoremove] PAQUET…` | noms valides, **refuse le kernel en cours d'exécution** |
 | `reboot` | — |
-| `mokutil-diagnose`, `mokutil-list-enrolled`, `mokutil-list-new` | — |
+| `mokutil-diagnose` | — (renvoie aussi `EFI_SHIM:` / `EFI_MOKMANAGER:` : la partition EFI n'est lisible que par root) |
+| `mokutil-list-enrolled`, `mokutil-list-new` | — |
 | `mokutil-import [--wait] CLÉ`, `mokutil-delete [--wait] CLÉ`, `mokutil-reset [--wait]` | clé `.der/.cer/.crt` appartenant à l'utilisateur |
+| `sources-install SOURCES [--headers HEADERS]` | dossiers `linux-*` appartenant à l'utilisateur ; refuse d'écraser une entrée existante de `/usr/src` ; copie en `root:root` |
+| `sources-link SOURCES VERSION [--headers HEADERS]` | idem ; crée `/usr/src/linux-VERSION`, `linux`, `linux-headers-VERSION`, `linux-headers` (refuse d'écraser un vrai dossier) |
+| `sources-remove VERSION` | lien ou copie ; refuse un dossier appartenant à un paquet Debian ; **ne supprime jamais de vrais headers** (uniquement des liens) |
 | `sign-kernel VERSION --sign-file … --key … --cert-der … [--cert-pem … --vmlinuz …] [--no-initramfs]` | version valide, `/lib/modules/VERSION` existe, `sign-file` appartient à root (ainsi que ses dossiers parents), clés appartenant à l'utilisateur appelant, vmlinuz dans `/boot` |
 
 Règles du helper :

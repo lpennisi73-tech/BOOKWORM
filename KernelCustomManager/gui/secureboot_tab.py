@@ -9,6 +9,7 @@ from gi.repository import Gtk, GLib, Pango
 import threading
 
 from utils.pkexec_helper import PkexecHelper
+from utils.terminal import launch_in_terminal
 import subprocess
 from pathlib import Path
 from datetime import datetime
@@ -1362,26 +1363,6 @@ def run_helper_action(parent, action, i18n, callback=None):
 
 
 def run_terminal_command(parent, command, i18n):
-    """
-    Lance une commande (liste d'arguments) dans un émulateur de terminal.
-    Pas de `bash -c` : les arguments sont transmis tels quels.
-    """
-    terminals = [
-        ["x-terminal-emulator", "-e"],
-        ["ptyxis", "--"],
-        ["gnome-terminal", "--"],
-        ["konsole", "-e"],
-        ["xterm", "-e"]
-    ]
-
-    for terminal_cmd in terminals:
-        try:
-            subprocess.Popen(terminal_cmd + command)
-            return
-        except FileNotFoundError:
-            continue
-        except Exception as e:
-            show_error_dialog(parent, str(e), i18n)
-            return
-
-    show_error_dialog(parent, i18n._("secureboot.no_terminal"), i18n)
+    """Lance une commande (liste d'arguments) dans un émulateur de terminal"""
+    if launch_in_terminal(command) is None:
+        show_error_dialog(parent, i18n._("secureboot.no_terminal"), i18n)

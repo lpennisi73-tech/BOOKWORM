@@ -237,25 +237,34 @@ class SecureBootManager:
 
                 if not success:
                     logging.warning(f"mokutil-diagnose: {error}")
-                    return {'enrolled_output': '', 'pending_output': ''}
+                    return {'enrolled_output': '', 'pending_output': '',
+                            'efi_shim': None, 'efi_mok_manager': None}
 
-                # Parser la sortie pour séparer ENROLLED et PENDING
-                enrolled_output = ''
-                pending_output = ''
-
-                if 'ENROLLED:' in output and 'PENDING:' in output:
-                    parts = output.split('PENDING:')
-                    enrolled_output = parts[0].replace('ENROLLED:', '').strip()
-                    pending_output = parts[1].strip()
+                # Sortie du helper :
+                #   EFI_SHIM:<chemin>  EFI_MOKMANAGER:<chemin>  ENROLLED: ...  PENDING: ...
+                sections = {'ENROLLED': [], 'PENDING': []}
+                efi = {}
+                current = None
+                for line in output.splitlines():
+                    if line.startswith(('EFI_SHIM:', 'EFI_MOKMANAGER:')):
+                        key, _, value = line.partition(':')
+                        efi[key] = value.strip() or None
+                    elif line.strip() in ('ENROLLED:', 'PENDING:'):
+                        current = line.strip()[:-1]
+                    elif current:
+                        sections[current].append(line)
 
                 self._mok_cache = {
-                    'enrolled_output': enrolled_output,
-                    'pending_output': pending_output
+                    'enrolled_output': '\n'.join(sections['ENROLLED']).strip(),
+                    'pending_output': '\n'.join(sections['PENDING']).strip(),
+                    'efi_shim': efi.get('EFI_SHIM'),
+                    'efi_mok_manager': efi.get('EFI_MOKMANAGER'),
                 }
 
                 return self._mok_cache
             except Exception:
-                return {'enrolled_output': '', 'pending_output': ''}
+                return {'enrolled_output': '', 'pending_output': '',
+                        'efi_shim': None, 'efi_mok_manager': None}
 
     def _get_local_cert_fingerprint(self):
         """
@@ -356,6 +365,21 @@ class SecureBootManager:
                 'cn_name': None,
                 'message': str(e)
             }
+
+    def check_efi_boot_files(self):
+        """
+        Présence de shim et de MOK Manager (mmx64.efi) sur la partition EFI
+        (lue par le helper : la partition EFI n'est lisible que par root sur Debian)
+        Returns: dict avec checked (bool), shim (str|None), mok_manager (str|None)
+        """
+        mok_data = self._fetch_mok_data()
+        checked = 'efi_shim' in mok_data and (mok_data['efi_shim'] or mok_data['efi_mok_manager']
+                                               or mok_data['enrolled_output'] or mok_data['pending_output'])
+        return {
+            'checked': bool(checked),
+            'shim': mok_data.get('efi_shim'),
+            'mok_manager': mok_data.get('efi_mok_manager'),
+        }
 
     def check_mok_pending(self):
         """
@@ -1058,30 +1082,9 @@ class SecureBootManager:
 
                 signed_count = 0
                 for module in sample:
-                    # Décompresser si nécessaire
-                    module_to_check = module
-                    temp_decompressed = None
-
-                    if module.suffix == '.xz':
-                        temp_decompressed = module.parent / module.stem
-                        subprocess.run(['xz', '-d', '-k', str(module)], capture_output=True, check=False)
-                        module_to_check = temp_decompressed
-                    elif module.suffix == '.gz':
-                        temp_decompressed = module.parent / module.stem
-                        subprocess.run(['gzip', '-d', '-k', str(module)], capture_output=True, check=False)
-                        module_to_check = temp_decompressed
-                    elif module.suffix == '.zst':
-                        temp_decompressed = module.parent / module.stem
-                        subprocess.run(['zstd', '-d', '-q', str(module), '-o', str(temp_decompressed)], capture_output=True, check=False)
-                        module_to_check = temp_decompressed
-
-                    sig_info = self.check_module_signed(str(module_to_check))
-                    if sig_info['signed']:
+                    # modinfo lit directement les modules compressés (.xz/.zst)
+                    if self.check_module_signed(str(module))['signed']:
                         signed_count += 1
-
-                    # Nettoyer le fichier temporaire
-                    if temp_decompressed and temp_decompressed.exists():
-                        temp_decompressed.unlink()
 
                 # Si moins de 50% des modules sont signés, l'initrd a un problème
                 initrd_ok = (signed_count / len(sample)) >= 0.5 if len(sample) > 0 else False
@@ -1212,6 +1215,12 @@ class SecureBootManager:
                     self.i18n._('secureboot.diag.sol_reboot_mok'),
                     self.i18n._('secureboot.diag.sol_cancel_reenroll')
                 ]
+                # Sans mmx64.efi, l'écran MOK Manager ne s'affichera jamais au démarrage
+                efi = self.check_efi_boot_files()
+                diagnosis['details']['efi'] = efi
+                if efi['checked'] and not efi['mok_manager']:
+                    diagnosis['message'] += '\n\n' + self.i18n._('secureboot.diag.mok_manager_missing')
+                    diagnosis['solutions'].insert(0, self.i18n._('secureboot.diag.sol_reinstall_shim'))
             else:
                 diagnosis['issue_type'] = 'MOK_NOT_ENROLLED'
                 diagnosis['message'] = self.i18n._('secureboot.diag.mok_not_enrolled')

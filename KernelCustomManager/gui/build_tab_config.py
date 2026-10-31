@@ -5,10 +5,12 @@ Module de configuration du kernel
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
+import re
 import subprocess
 import shutil
 from pathlib import Path
 from utils.i18n import get_i18n
+from utils.terminal import launch_in_terminal, build_runner_command
 
 
 def show_config_dialog(main_window):
@@ -85,14 +87,7 @@ def configure_from_system(main_window, run_menuconfig=True):
         shutil.copy(config_file, dest_config)
         
         # Adaptation Debian : pas de clés de confiance intégrées (sinon la compilation échoue)
-        subprocess.run(
-            ["sed", "-i", 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/', str(dest_config)],
-            check=True
-        )
-        subprocess.run(
-            ["sed", "-i", 's/CONFIG_SYSTEM_REVOCATION_KEYS=.*/CONFIG_SYSTEM_REVOCATION_KEYS=""/', str(dest_config)],
-            check=True
-        )
+        clear_system_keys(dest_config)
         
         subprocess.run(
             ["make", "olddefconfig"],
@@ -155,25 +150,19 @@ def configure_from_file(main_window, run_menuconfig=True):
     dialog.destroy()
 
 
+def clear_system_keys(config_path):
+    """Vide CONFIG_SYSTEM_TRUSTED_KEYS et CONFIG_SYSTEM_REVOCATION_KEYS (clés Debian absentes)"""
+    content = config_path.read_text()
+    for option in ("CONFIG_SYSTEM_TRUSTED_KEYS", "CONFIG_SYSTEM_REVOCATION_KEYS"):
+        content = re.sub(rf'^{option}=.*$', f'{option}=""', content, flags=re.MULTILINE)
+    config_path.write_text(content)
+
+
 def run_menuconfig_terminal(main_window):
-    """Lance menuconfig dans un terminal"""
+    """Lance make nconfig dans un terminal (liste d'arguments, aucun `bash -c`)"""
     i18n = get_i18n()
     linux_dir = main_window.kernel_manager.base_dir / "linux"
 
-    terminals = [
-        ["gnome-terminal", "--", "bash", "-c"],
-        ["ptyxis", "--", "bash", "-c"],
-        ["konsole", "-e", "bash", "-c"],
-        ["xterm", "-e", "bash", "-c"]
-    ]
-
-    cmd = f"cd '{linux_dir}' && make nconfig; read -p '{i18n._('misc.menuconfig_prompt')}'"
-
-    for terminal in terminals:
-        try:
-            subprocess.Popen(terminal + [cmd])
-            return
-        except FileNotFoundError:
-            continue
-
-    main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_terminal"))
+    command = build_runner_command("nconfig", linux_dir, i18n._('misc.menuconfig_prompt'))
+    if launch_in_terminal(command) is None:
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_terminal"))

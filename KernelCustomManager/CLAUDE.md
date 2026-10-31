@@ -24,7 +24,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - [x] **1. CLAUDE.md** : plan et conventions (ce fichier)
 - [x] **2. Retrait d'Ubuntu** : `core/driver_manager.py`, `core/secureboot_manager.py`, `gui/build_tab_*.py`, `install.sh`, `scripts/secureboot/fix_mok_not_appearing.sh` (`EFI/debian`), doc et traductions
 - [x] **3. Helper root en Python** : `kernelcustom-helper` réécrit en Python avec une **liste blanche d'actions** et la validation des chemins (uniquement dans `/usr/src`, le dossier de travail de l'utilisateur, `/boot`…). Supprimer `pkexec bash -c` (`gui/secureboot_tab.py`) et `shell=True` (`core/secureboot_manager.py`). Tous les `pkexec apt/dpkg/cp/systemctl` dispersés passent par le helper
-- [ ] **4. Portage du bash restant** : `manage_kernel_sources.sh` devient `core/sources_manager.py` + des actions `sources-*` dans le helper (encore appelé via `pkexec` dans `gui/sources_tab.py`). `scripts/secureboot/*.sh` est intégré dans `core/secureboot_manager.py` ou supprimé s'il fait doublon. Le script de compilation généré puis lancé avec `bash -c` dans un terminal (`gui/build_tab_compile.py`, `gui/build_tab_config.py`, exécuté sans privilèges) est remplacé par un lanceur Python (`shlex.quote` / liste d'arguments)
+- [x] **4. Portage du bash restant** : `manage_kernel_sources.sh` → `core/sources_manager.py` + actions `sources-*` du helper. `scripts/secureboot/*.sh` supprimés (doublons de l'app ; seul le contrôle shim/mmx64.efi était nouveau → intégré au diagnostic via `mokutil-diagnose`). Script de compilation `bash -c` → `core/build_runner.py` lancé via `utils/terminal.py`
 - [ ] **5. Chemins centralisés** : nouveau module `utils/paths.py` (dossier de l'app, traductions, icônes, helper, dossier de travail XDG + migration). Plus de `Path(__file__).parent.parent` ni de `/usr/local/bin` codé en dur ailleurs. L'app doit fonctionner **installée ET lancée depuis le dépôt git**
 - [ ] **6. Outil de nettoyage du dossier de travail** : `core/cleanup_manager.py` + une interface (onglet ou dialogue). Il liste avec leur taille les sources extraites, les arbres compilés, les archives `.tar.xz` téléchargées, les `.deb` générés, les logs et les fichiers pilotes. On peut les supprimer en sélection ou par catégorie, avec confirmation. **Il ne touche jamais** aux sources liées dans `/usr/src` ni au kernel en cours d'exécution (`uname -r`). Les clés MOK sont exclues par défaut
 - [ ] **7. Portage GTK4 + libadwaita** : onglet par onglet (voir la section dédiée). L'interface de l'outil de nettoyage est écrite directement en GTK4 si l'étape 6 arrive après le début du portage
@@ -44,6 +44,14 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - Ajouter une opération root = une nouvelle action validée dans le helper + une méthode dans `PkexecHelper`. Documenter dans `docs/POLICYKIT_README.md`.
 - `modinfo` **ne nécessite pas root** et lit directement les `.ko.xz`/`.ko.zst` : pas de helper pour vérifier une signature.
 - Le `kmod` de Debian est compilé sans zlib : les modules `.ko.gz` ne sont pas lisibles par `modinfo` (Debian utilise xz/zstd).
+
+## Compilation et terminaux (étape 4)
+
+- `utils/terminal.py` `launch_in_terminal(argv)` est le **seul** moyen d'ouvrir un terminal. La commande est une liste d'arguments (ptyxis, gnome-terminal, kgx, konsole, xfce4-terminal, xterm).
+- `core/build_runner.py` est un script **autonome** (aucun import de l'app, lancé avec `python3 -I`). Il prend en entrée un `compile <job.json>` (configuration + textes déjà traduits) ou un `nconfig <linux_dir> <message>`.
+- Suivi de fin : le runner écrit `<log>.status.json` (`running` + pid, puis `done` + returncode + paquets) et l'app le surveille (`_wait_for_status`). Le code de retour du terminal ne sert pas, car gnome-terminal rend la main immédiatement.
+- Le suffixe `LOCALVERSION` est validé (`^[A-Za-z0-9._+~-]+$`) et passé comme argument de `make`, jamais interprété par un shell.
+- `tar` (extraction des sources) et `make` restent des outils système appelés avec des listes d'arguments.
 
 ## Disposition du paquet .deb
 
@@ -99,6 +107,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - Un appel `pkexec` (mokutil-diagnose) est lancé **au démarrage** par l'onglet SecureBoot. Il faudrait le différer jusqu'à l'ouverture de l'onglet ou une action de l'utilisateur.
 - `utils/dialogs.py` `show_question()` renvoie un **booléen** : ne jamais le comparer à `Gtk.ResponseType` (bug corrigé à l'étape 3 dans `drivers_tab.py`, où l'installation, la suppression et le rollback ne pouvaient jamais aboutir). À garder en tête pour l'API async GTK4.
 - `gui/secureboot_tab.py` contient encore de nombreux `print("[DEBUG GUI] …")` : à passer en `logging`.
+- La signature SecureBoot à la compilation (`sign_for_secureboot`) est désactivée dans l'interface (case commentée dans `show_compile_dialog`). Le runner la gère : il suffira de la réactiver lors du portage GTK4.
 - `docs/ARCHITECTURE.md` : décrit encore GTK3, Ubuntu et AMD. À réécrire à l'étape Release.
 - `install.sh` : installe `debhelper-compat` (paquet virtuel). À revoir avec `debian/control` à l'étape 8.
 

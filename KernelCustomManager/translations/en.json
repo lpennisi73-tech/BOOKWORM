@@ -72,7 +72,8 @@
       "profile_load_failed": "Cannot load profile",
       "profile_delete_failed": "Cannot delete:\n{error}",
       "select_version": "Please select a version",
-      "invalid_version": "Invalid version"
+      "invalid_version": "Invalid version",
+      "invalid_suffix": "Invalid suffix: use only letters, digits and the characters . _ + ~ - (e.g. -kernelcustom)"
     },
     "confirm": {
       "title": "Confirm",
@@ -479,6 +480,8 @@
       "mok_pending": "MOK key is pending enrollment. Reboot required.",
       "sol_reboot_mok": "Reboot and follow MOK Manager instructions",
       "sol_cancel_reenroll": "Cancel pending enrollment and re-enroll",
+      "mok_manager_missing": "⚠️ MOK Manager (mmx64.efi) was not found on the EFI partition: the enrollment screen cannot appear at boot.",
+      "sol_reinstall_shim": "Reinstall shim: sudo apt reinstall shim-signed",
       "mok_not_enrolled": "MOK key is not enrolled. Cannot boot custom kernels.",
       "sol_enroll_mok": "Enroll MOK key (automated wizard available)",
       "sol_disable_sb": "Disable SecureBoot to boot without signature",

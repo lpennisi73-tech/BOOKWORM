@@ -5,12 +5,18 @@ Module de compilation du kernel
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
-import subprocess
+import json
+import re
 import threading
 import os
+import time
 from datetime import datetime
 from utils.i18n import get_i18n
+from utils.terminal import launch_in_terminal, build_runner_command
 from core.secureboot_manager import SecureBootManager
+
+
+LOCALVERSION_RE = re.compile(r'^[A-Za-z0-9._+~-]+$')
 
 
 def show_compile_dialog(main_window):
@@ -109,6 +115,11 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
     i18n = get_i18n()
     linux_dir = main_window.kernel_manager.base_dir / "linux"
 
+    # LOCALVERSION : caractères autorisés dans une version de kernel uniquement
+    if suffix and not LOCALVERSION_RE.match(suffix):
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.invalid_suffix"))
+        return
+
     try:
         kernel_version = linux_dir.resolve().name.replace("linux-", "")
     except:
@@ -120,8 +131,6 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_file = main_window.kernel_manager.log_dir / f"compile-{timestamp}.log"
 
-    fakeroot_cmd = "fakeroot " if use_fakeroot else ""
-    suffix_cmd = f"LOCALVERSION={suffix}" if suffix else ""
 
     start_time = datetime.now()
 
@@ -172,227 +181,124 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
             with open(config_file, 'w') as f:
                 f.write(config_content)
 
-    # Préparer la signature SecureBoot (TOUJOURS avant bindeb-pkg, simple et fiable)
-    signing_before_bindeb = ""
-
+    # Signature SecureBoot des modules AVANT bindeb-pkg (CONFIG_MODULE_COMPRESS_NONE=y
+    # garantit que les modules restent en .ko)
+    sign_config = None
     if sign_for_secureboot:
-        keys_dir = sb_manager.keys_dir
-        available_keys = list(keys_dir.glob("*.priv"))
+        keys = list(sb_manager.keys_dir.glob("*.priv"))
+        key_file = next((k for k in keys if k.stem == "MOK"), keys[0] if keys else None)
+        if key_file and key_file.with_suffix('.der').exists():
+            sign_config = {"key": str(key_file), "cert": str(key_file.with_suffix('.der'))}
 
-        if available_keys:
-            # Utiliser la première clé disponible (ou MOK si elle existe)
-            key_file = None
-            for k in available_keys:
-                if k.stem == "MOK":
-                    key_file = k
-                    break
-            if not key_file:
-                key_file = available_keys[0]
-
-            priv_key = key_file
-            cert = key_file.with_suffix('.der')
-
-            if cert.exists():
-                # Script de signature des modules AVANT bindeb-pkg
-                # Simple et fiable : signe tous les modules .ko dans le répertoire de build
-                # Sur Debian, CONFIG_MODULE_COMPRESS_NONE=y garantit que les modules restent en .ko
-                signing_before_bindeb = f"""
-echo ''
-echo '================================='
-echo '{i18n._("secureboot.signing_modules_before_packaging")}'
-echo '================================='
-
-# Trouver l'outil sign-file
-SIGN_FILE=""
-for location in "/usr/src/linux-headers-$(uname -r)/scripts/sign-file" \\
-                "/lib/modules/$(uname -r)/build/scripts/sign-file" \\
-                "scripts/sign-file"; do
-    if [ -f "$location" ]; then
-        SIGN_FILE="$location"
-        break
-    fi
-done
-
-if [ -z "$SIGN_FILE" ]; then
-    echo "❌ Error: sign-file tool not found"
-    exit 1
-fi
-
-echo ""
-echo "🔍 {i18n._("secureboot.counting_modules")}..."
-
-# Compter les modules .ko (non compressés grâce à CONFIG_MODULE_COMPRESS_NONE)
-MODULES=($(find . -name "*.ko"))
-TOTAL_MODULES=${{#MODULES[@]}}
-
-echo "📦 {i18n._("secureboot.found_modules")}: $TOTAL_MODULES"
-echo ""
-
-if [ "$TOTAL_MODULES" -eq 0 ]; then
-    echo "⚠️  {i18n._("secureboot.no_modules_found")}"
-else
-    echo "🔐 {i18n._("secureboot.starting_signature")}..."
-    echo ""
-
-    # Signer tous les modules avec affichage de progression
-    SIGNED_COUNT=0
-    FAILED_COUNT=0
-    CURRENT=0
-
-    for module in "${{MODULES[@]}}"; do
-        CURRENT=$((CURRENT + 1))
-        MODULE_NAME=$(basename "$module")
-
-        # Afficher la progression
-        if [ "$TOTAL_MODULES" -le 50 ] || [ $((CURRENT % 10)) -eq 0 ] || [ "$CURRENT" -eq "$TOTAL_MODULES" ]; then
-            printf "\\r🔏 [{i18n._("secureboot.progress")}: %3d/%3d] {i18n._("secureboot.signing")}: %-50s" "$CURRENT" "$TOTAL_MODULES" "$MODULE_NAME"
-        fi
-
-        # Signer le module
-        if "$SIGN_FILE" sha256 '{priv_key}' '{cert}' "$module" >/dev/null 2>&1; then
-            SIGNED_COUNT=$((SIGNED_COUNT + 1))
-        else
-            FAILED_COUNT=$((FAILED_COUNT + 1))
-            echo ""
-            echo "  ⚠️  {i18n._("secureboot.failed_to_sign")}: $MODULE_NAME"
-        fi
-    done
-
-    echo ""
-    echo ""
-
-    if [ "$FAILED_COUNT" -eq 0 ]; then
-        echo "✅ {i18n._("secureboot.all_modules_signed")}: $SIGNED_COUNT"
-    else
-        echo "⚠️  {i18n._("secureboot.modules_signed_with_errors")}: $SIGNED_COUNT/$TOTAL_MODULES ({i18n._("secureboot.signing_failed")}: $FAILED_COUNT)"
-    fi
-fi
-
-echo '================================='
-echo ''
-"""
-
-    cmd = f"""
-cd '{linux_dir}' || exit 1
-echo '{i18n._("compilation.header")}'
-echo '{i18n._("compilation.threads", count=jobs)}'
-echo '{i18n._("compilation.suffix", suffix=(suffix or i18n._("compilation.suffix_none")))}'
-echo '{i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no")))}'
-{"echo 'SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + " (AVANT bindeb-pkg)'" if sign_for_secureboot else ""}
-{"echo 'Distribution: Debian (CONFIG_MODULE_COMPRESS_NONE activé)'" if sign_for_secureboot else ""}
-echo ''
-echo '{i18n._("compilation.starting")}'
-sleep 2
-
-# Étape 1: Compilation des modules
-echo ''
-echo '{i18n._("compilation.compiling_modules")}'
-make -j{jobs} {suffix_cmd} 2>&1 | tee '{log_file}'
-RESULT=${{PIPESTATUS[0]}}
-
-if [ $RESULT -ne 0 ]; then
-    echo ''
-    echo '================================='
-    echo '{i18n._("compilation.failed")}'
-    echo "Return code: $RESULT"
-    echo '================================='
-    echo ''
-    echo '{i18n._("compilation.press_enter")}'
-    read
-    exit $RESULT
-fi
-
-{signing_before_bindeb}
-
-# Étape 2: Création du package .deb
-echo ''
-echo '{i18n._("compilation.creating_package")}'
-{fakeroot_cmd}make bindeb-pkg {suffix_cmd} 2>&1 | tee -a '{log_file}'
-RESULT=${{PIPESTATUS[0]}}
-
-if [ $RESULT -ne 0 ]; then
-    echo ''
-    echo '================================='
-    echo '{i18n._("compilation.failed")}'
-    echo "Return code: $RESULT"
-    echo '================================='
-    echo ''
-    echo '{i18n._("compilation.press_enter")}'
-    read
-    exit $RESULT
-fi
-
-# Étape 3: Déplacement des packages
-echo ''
-echo '================================='
-echo '{i18n._("compilation.success")}'
-echo ''
-
-echo '{i18n._("compilation.moving_packages")}'
-for deb in ../*.deb; do
-    if [ -f "$deb" ]; then
-        mv "$deb" '{main_window.kernel_manager.repo_dir}/'
-        echo "✓ $(basename "$deb") moved"
-    fi
-done
-
-echo '================================='
-echo ''
-echo '{i18n._("compilation.press_enter")}'
-read
-"""
-    
-    terminals = [
-        ["gnome-terminal", "--", "bash", "-c"],
-        ["ptyxis", "--", "bash", "-c"],
-        ["konsole", "-e", "bash", "-c"],
-        ["xterm", "-e", "bash", "-c"]
+    suffix_label = suffix or i18n._("compilation.suffix_none")
+    header = [
+        i18n._("compilation.header"),
+        i18n._("compilation.threads", count=jobs),
+        i18n._("compilation.suffix", suffix=suffix_label),
+        i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no"))),
     ]
-    
-    launched = False
-    for terminal in terminals:
-        try:
-            process = subprocess.Popen(terminal + [cmd])
-            launched = True
-            
-            main_window.dialogs.show_info(
-                i18n._("message.success.title"),
-                i18n._("message.info.compilation_launched", threads=jobs, suffix=(suffix or i18n._("compilation.suffix_none")), log=str(log_file))
-            )
-            
-            # Thread pour surveiller la fin
-            def monitor_compilation():
-                process.wait()
-                end_time = datetime.now()
-                duration = int((end_time - start_time).total_seconds())
+    if sign_config:
+        header.append("SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + " (AVANT bindeb-pkg)")
+    header += ["", i18n._("compilation.starting")]
 
-                success = process.returncode == 0
-                packages = [p.name for p in main_window.kernel_manager.repo_dir.glob("linux-*.deb")]
+    status_file = log_file.with_suffix(".status.json")
+    job = {
+        "linux_dir": str(linux_dir),
+        "jobs": jobs,
+        "localversion": suffix,
+        "use_fakeroot": use_fakeroot,
+        "log_file": str(log_file),
+        "repo_dir": str(main_window.kernel_manager.repo_dir),
+        "status_file": str(status_file),
+        "sign": sign_config,
+        "messages": {
+            "header": header,
+            "compiling_modules": i18n._("compilation.compiling_modules"),
+            "creating_package": i18n._("compilation.creating_package"),
+            "success": i18n._("compilation.success"),
+            "failed": i18n._("compilation.failed"),
+            "moving_packages": i18n._("compilation.moving_packages"),
+            "press_enter": i18n._("compilation.press_enter"),
+            "signing_header": i18n._("secureboot.signing_modules_before_packaging"),
+            "found_modules": i18n._("secureboot.found_modules"),
+            "no_modules": i18n._("secureboot.no_modules_found"),
+            "sign_failed": i18n._("secureboot.failed_to_sign"),
+            "signed_with_errors": i18n._("secureboot.modules_signed_with_errors"),
+            "all_signed": i18n._("secureboot.all_modules_signed"),
+        },
+    }
+    main_window.kernel_manager.log_dir.mkdir(parents=True, exist_ok=True)
+    job_file = log_file.with_suffix(".job.json")
+    job_file.write_text(json.dumps(job, ensure_ascii=False, indent=2))
 
-                # Ajouter à l'historique
-                main_window.kernel_manager.add_compilation_to_history(
-                    kernel_version, suffix, success, duration, packages
-                )
-
-                # Notification
-                if success:
-                    main_window.kernel_manager.send_notification(
-                        i18n._("message.success.compilation_success"),
-                        i18n._("message.success.compilation_success_notification", version=kernel_version, suffix=suffix, time=f"{duration//60}m {duration%60}s"),
-                        "low"
-                    )
-                else:
-                    main_window.kernel_manager.send_notification(
-                        i18n._("compilation.failed"),
-                        i18n._("compilation.failed_notification", version=kernel_version, suffix=suffix),
-                        "critical"
-                    )
-
-            threading.Thread(target=monitor_compilation, daemon=True).start()
-            break
-            
-        except FileNotFoundError:
-            continue
-    
-    if not launched:
+    # Lancement dans un terminal : liste d'arguments, aucun `bash -c`
+    if launch_in_terminal(build_runner_command("compile", job_file)) is None:
         main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_terminal"))
+        return
+
+    main_window.dialogs.show_info(
+        i18n._("message.success.title"),
+        i18n._("message.info.compilation_launched", threads=jobs, suffix=suffix_label, log=str(log_file))
+    )
+
+    def monitor_compilation():
+        """
+        Suit la compilation via le fichier d'état écrit par build_runner
+        (le processus du terminal peut se terminer immédiatement, ex. gnome-terminal)
+        """
+        status = _wait_for_status(status_file)
+        duration = int((datetime.now() - start_time).total_seconds())
+        success = status.get("returncode") == 0
+        packages = status.get("packages", [])
+
+        main_window.kernel_manager.add_compilation_to_history(
+            kernel_version, suffix, success, duration, packages
+        )
+
+        if success:
+            main_window.kernel_manager.send_notification(
+                i18n._("message.success.compilation_success"),
+                i18n._("message.success.compilation_success_notification", version=kernel_version, suffix=suffix, time=f"{duration//60}m {duration%60}s"),
+                "low"
+            )
+        else:
+            main_window.kernel_manager.send_notification(
+                i18n._("compilation.failed"),
+                i18n._("compilation.failed_notification", version=kernel_version, suffix=suffix),
+                "critical"
+            )
+
+    threading.Thread(target=monitor_compilation, daemon=True).start()
+
+
+def _wait_for_status(status_file, start_timeout=120, poll=2):
+    """
+    Attend la fin de la compilation (state == "done").
+    Retourne {"returncode": 1} si le runner n'a jamais démarré ou si son
+    processus a disparu (terminal fermé) sans écrire de résultat.
+    """
+    waited = 0
+    while True:
+        try:
+            status = json.loads(status_file.read_text())
+        except (OSError, ValueError):
+            status = None
+
+        if status is None:
+            if waited >= start_timeout:
+                return {"returncode": 1}
+        elif status.get("state") == "done":
+            return status
+        elif status.get("state") == "running" and not _pid_alive(status.get("pid")):
+            return {"returncode": 1}
+
+        time.sleep(poll)
+        waited += poll
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False

@@ -5,11 +5,14 @@ Onglet de gestion des sources dans /usr/src/
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
-import subprocess
 import threading
 from pathlib import Path
 from utils.i18n import get_i18n
-from utils.pkexec_helper import PkexecHelper
+from core.sources_manager import SourcesManager
+
+
+def _manager(main_window):
+    return SourcesManager(main_window.kernel_manager.sources_dir)
 
 
 def create_sources_tab(main_window):
@@ -107,32 +110,15 @@ def create_sources_tab(main_window):
 
 def refresh_sources(main_window, available_store, installed_store):
     """Actualise la liste des sources"""
-    
+    manager = _manager(main_window)
+
     available_store.clear()
-    sources_dir = main_window.kernel_manager.sources_dir
-    if sources_dir.exists():
-        for src in sorted(sources_dir.glob("linux-*")):
-            if src.is_dir():
-                version = src.name.replace("linux-", "")
-                available_store.append([version])
-    
+    for version in manager.list_available():
+        available_store.append([version])
+
     installed_store.clear()
-    usr_src = Path("/usr/src")
-    
-    active_link = ""
-    linux_link = usr_src / "linux"
-    if linux_link.is_symlink():
-        target = linux_link.readlink()
-        # Extraire le nom de base du chemin (chemin complet ou relatif)
-        target_name = Path(target).name
-        active_link = target_name.replace("linux-", "")
-    
-    if usr_src.exists():
-        for src in sorted(usr_src.glob("linux-[0-9]*")):
-            if src.is_dir() or src.is_symlink():
-                version = src.name.replace("linux-", "")
-                is_active = "✓" if version == active_link else ""
-                installed_store.append([version, is_active])
+    for entry in manager.list_installed():
+        installed_store.append([entry['version'], "✓" if entry['active'] else ""])
 
 
 def link_to_usr_src(main_window, view, available_store, installed_store, with_suffix):
@@ -196,15 +182,10 @@ def link_to_usr_src(main_window, view, available_store, installed_store, with_su
     else:
         full_version = None
 
-    # Construire la commande
-    script_path = Path(__file__).parent.parent / "manage_kernel_sources.sh"
-
     if full_version:
         cmd_desc = f"Lien: linux-{base_version} -> linux-{full_version}"
-        cmd = ["pkexec", str(script_path), "link", base_version, full_version]
     else:
         cmd_desc = f"Lien: linux-{base_version}"
-        cmd = ["pkexec", str(script_path), "link", base_version]
 
     if not main_window.dialogs.show_question(
         i18n._("message.confirm.title"),
@@ -246,25 +227,23 @@ def link_to_usr_src(main_window, view, available_store, installed_store, with_su
             
             pulse_id = GLib.timeout_add(100, pulse_progress)
             
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True
-            )
-            
+            success, message = _manager(main_window).link(base_version, full_version)
+
             GLib.source_remove(pulse_id)
             GLib.idle_add(dialog.destroy)
-            
-            if result.returncode == 0:
+
+            if success:
                 if full_version:
                     success_msg = i18n._("message.success.link_created", version=full_version)
                 else:
                     success_msg = i18n._("message.success.link_created_simple")
+                if message:  # avertissement (headers absents)
+                    success_msg += f"\n\n⚠️ {message}"
 
                 GLib.idle_add(main_window.dialogs.show_info, i18n._("message.success.title"), success_msg)
                 GLib.idle_add(lambda: refresh_sources(main_window, available_store, installed_store))
             else:
-                error_msg = result.stderr if result.stderr else "Erreur inconnue"
+                error_msg = message or "Erreur inconnue"
                 GLib.idle_add(main_window.dialogs.show_error, i18n._("message.error.title"), f"Échec:\n\n{error_msg}")
         
         except Exception as e:
@@ -326,18 +305,12 @@ def install_to_usr_src(main_window, view, available_store, installed_store):
             
             pulse_id = GLib.timeout_add(100, pulse_progress)
             
-            script_path = Path(__file__).parent.parent / "manage_kernel_sources.sh"
-            
-            result = subprocess.run(
-                ["pkexec", str(script_path), "install", version],
-                capture_output=True,
-                text=True
-            )
-            
+            success, message = _manager(main_window).install(version)
+
             GLib.source_remove(pulse_id)
             GLib.idle_add(dialog.destroy)
-            
-            if result.returncode == 0:
+
+            if success:
                 GLib.idle_add(
                     main_window.dialogs.show_info,
                     i18n._("message.success.title"),
@@ -345,7 +318,7 @@ def install_to_usr_src(main_window, view, available_store, installed_store):
                 )
                 GLib.idle_add(lambda: refresh_sources(main_window, available_store, installed_store))
             else:
-                error_msg = result.stderr if result.stderr else "Erreur inconnue"
+                error_msg = message or "Erreur inconnue"
                 GLib.idle_add(main_window.dialogs.show_error, i18n._("message.error.title"), f"Échec:\n\n{error_msg}")
 
         except Exception as e:
@@ -417,25 +390,13 @@ def remove_from_usr_src(main_window, view, available_store, installed_store):
 
             pulse_id = GLib.timeout_add(100, pulse_progress)
 
-            script_path = Path(__file__).parent.parent / "manage_kernel_sources.sh"
+            # Le helper gère les deux cas (lien ou copie) et conserve les vrais headers système
+            success, message = SourcesManager.remove(version)
 
-            # Choisir la bonne commande selon le type
-            command = "unlink" if is_symlink else "remove"
-
-            process = subprocess.Popen(
-                ["pkexec", str(script_path), command, version],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
-            stdout, stderr = process.communicate(input="y\n")
-            
             GLib.source_remove(pulse_id)
             GLib.idle_add(dialog.destroy)
-            
-            if process.returncode == 0:
+
+            if success:
                 GLib.idle_add(
                     main_window.dialogs.show_info,
                     i18n._("message.success.title"),
@@ -443,7 +404,7 @@ def remove_from_usr_src(main_window, view, available_store, installed_store):
                 )
                 GLib.idle_add(lambda: refresh_sources(main_window, available_store, installed_store))
             else:
-                error_msg = stderr if stderr else "Erreur inconnue"
+                error_msg = message or "Erreur inconnue"
                 GLib.idle_add(main_window.dialogs.show_error, i18n._("message.error.title"), f"Échec:\n\n{error_msg}")
 
         except Exception as e:

@@ -17,6 +17,7 @@ import argparse
 import gzip
 import lzma
 import os
+import shutil
 import re
 import stat
 import subprocess
@@ -33,6 +34,8 @@ PKG_RE = re.compile(r'^[a-z0-9][a-z0-9+.-]+(:[a-z0-9]+)?$')
 KVER_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+~-]*$')
 KERNEL_DEB_RE = re.compile(r'^linux-(image|headers|libc-dev)(-.+)?$')
 MODULE_EXTS = ('.ko', '.ko.xz', '.ko.gz', '.ko.zst')
+USR_SRC = Path('/usr/src')
+ESP_MOUNTS = ('/boot/efi', '/efi')
 
 APT_ENV = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive', 'LC_ALL': 'C.UTF-8'}
 
@@ -94,6 +97,22 @@ def user_file(path, suffixes=None):
         raise HelperError(f"le fichier n'appartient pas à l'utilisateur appelant: {path}")
     if suffixes and not real.name.endswith(tuple(suffixes)):
         raise HelperError(f"extension inattendue: {path}")
+    return real
+
+
+def user_dir(path, name_prefix):
+    """Dossier réel appartenant à l'utilisateur appelant, nommé <name_prefix>*"""
+    real = Path(os.path.realpath(path))
+    try:
+        st = real.stat()
+    except OSError:
+        raise HelperError(f"dossier introuvable: {path}")
+    if not stat.S_ISDIR(st.st_mode):
+        raise HelperError(f"pas un dossier: {path}")
+    if st.st_uid != caller_uid():
+        raise HelperError(f"le dossier n'appartient pas à l'utilisateur appelant: {path}")
+    if not real.name.startswith(name_prefix) or not KVER_RE.match(real.name):
+        raise HelperError(f"nom de dossier inattendu: {real.name}")
     return real
 
 
@@ -175,6 +194,30 @@ def wait_for_enter(args):
             pass
 
 
+def find_efi_boot_files():
+    """
+    Cherche shim (shimx64.efi) et MOK Manager (mmx64.efi) sur la partition EFI.
+    Sans mmx64.efi, l'écran bleu MOK Manager ne peut pas s'afficher au démarrage.
+    """
+    shim = mok_manager = None
+    for mount in ESP_MOUNTS:
+        efi = Path(mount) / 'EFI'
+        if not efi.is_dir():
+            continue
+        # Debian d'abord, puis le chemin de secours EFI/BOOT, puis les autres
+        dirs = [efi / 'debian', efi / 'BOOT'] + sorted(d for d in efi.iterdir() if d.is_dir())
+        for d in dirs:
+            for name in os.listdir(d) if d.is_dir() else []:
+                lower = name.lower()
+                if shim is None and lower.startswith('shim') and lower.endswith('.efi'):
+                    shim = d / name
+                if mok_manager is None and lower.startswith('mm') and lower.endswith('.efi'):
+                    mok_manager = d / name
+        if shim or mok_manager:
+            break
+    return shim, mok_manager
+
+
 def cmd_mokutil_list_enrolled(args):
     sys.exit(subprocess.run(['mokutil', '--list-enrolled']).returncode)
 
@@ -186,6 +229,9 @@ def cmd_mokutil_list_new(args):
 def cmd_mokutil_diagnose(args):
     # mokutil peut retourner un code non nul avec une sortie valide (Debian 13+) :
     # on ignore le code de retour et on renvoie toujours la sortie
+    shim, mok_manager = find_efi_boot_files()
+    out(f"EFI_SHIM:{shim or ''}")
+    out(f"EFI_MOKMANAGER:{mok_manager or ''}")
     out("ENROLLED:")
     subprocess.run(['mokutil', '--list-enrolled'], stderr=subprocess.STDOUT)
     out("PENDING:")
@@ -210,6 +256,126 @@ def cmd_mokutil_delete(args):
 
 def cmd_mokutil_reset(args):
     _mokutil_interactive(args, '--reset')
+
+
+# ==================== Sources kernel dans /usr/src ====================
+
+def _usr_src_entry(name):
+    """Chemin /usr/src/<name> avec un nom validé (pas de / ni de ..)"""
+    if not KVER_RE.match(name):
+        raise HelperError(f"nom invalide: {name!r}")
+    return USR_SRC / name
+
+
+def _replace_symlink(link, target):
+    """Crée/remplace un lien symbolique (refuse d'écraser un vrai fichier/dossier)"""
+    if link.exists() or link.is_symlink():
+        if not link.is_symlink():
+            raise HelperError(f"{link} existe et n'est pas un lien symbolique")
+        link.unlink()
+    link.symlink_to(target)
+    out(f"LINK:{link} -> {target}")
+
+
+def _chown_root_tree(root):
+    os.lchown(root, 0, 0)
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            os.lchown(os.path.join(dirpath, name), 0, 0)
+
+
+def _owned_by_package(path):
+    return subprocess.run(['dpkg-query', '-S', str(path)],
+                          capture_output=True).returncode == 0
+
+
+def cmd_sources_install(args):
+    """Copie les sources (et headers) dans /usr/src et met à jour les liens linux / linux-headers"""
+    src = user_dir(args.source, 'linux-')
+    dest = _usr_src_entry(src.name)
+    if dest.exists() or dest.is_symlink():
+        raise HelperError(f"{dest} existe déjà : supprimez-le d'abord")
+    out(f"COPY:{src} -> {dest}")
+    shutil.copytree(src, dest, symlinks=True)
+    _chown_root_tree(dest)
+    _replace_symlink(USR_SRC / 'linux', src.name)
+
+    if args.headers:
+        headers = user_dir(args.headers, 'linux-headers-')
+        headers_dest = _usr_src_entry(headers.name)
+        if headers_dest.exists():
+            out(f"HEADERS_PRESENT:{headers_dest}")
+        else:
+            out(f"COPY:{headers} -> {headers_dest}")
+            shutil.copytree(headers, headers_dest, symlinks=True)
+            _chown_root_tree(headers_dest)
+        _replace_symlink(USR_SRC / 'linux-headers', headers.name)
+
+
+def cmd_sources_link(args):
+    """
+    Crée /usr/src/linux-<version> -> sources de l'utilisateur (pour DKMS),
+    ainsi que les liens linux, linux-headers-<version> et linux-headers
+    """
+    src = user_dir(args.source, 'linux-')
+    check_kernel_version(args.full_version)
+    _replace_symlink(_usr_src_entry(f'linux-{args.full_version}'), src)
+    _replace_symlink(USR_SRC / 'linux', src)
+
+    headers_entry = _usr_src_entry(f'linux-headers-{args.full_version}')
+    if headers_entry.exists():
+        out(f"HEADERS_PRESENT:{headers_entry}")
+    elif args.headers:
+        _replace_symlink(headers_entry, user_dir(args.headers, 'linux-headers-'))
+    else:
+        out("HEADERS_MISSING:")
+        return
+    _replace_symlink(USR_SRC / 'linux-headers', headers_entry)
+
+
+def _remove_main_link(name, *matches):
+    """Supprime /usr/src/<name> (linux ou linux-headers) s'il pointe vers une des cibles"""
+    link = USR_SRC / name
+    if not link.is_symlink():
+        return
+    target = os.readlink(link)
+    if Path(target).name in matches or target in matches:
+        link.unlink()
+        out(f"UNLINK:{link}")
+
+
+def cmd_sources_remove(args):
+    """
+    Supprime /usr/src/linux-<version> (lien OU copie faite par sources-install).
+    Les headers ne sont supprimés que s'il s'agit d'un lien : jamais de vrais headers système.
+    """
+    check_kernel_version(args.version)
+    src_entry = _usr_src_entry(f'linux-{args.version}')
+    headers_entry = _usr_src_entry(f'linux-headers-{args.version}')
+
+    if src_entry.is_symlink():
+        src_target = os.readlink(src_entry)
+        src_entry.unlink()
+        out(f"UNLINK:{src_entry}")
+    elif src_entry.is_dir():
+        if _owned_by_package(src_entry):
+            raise HelperError(f"{src_entry} appartient à un paquet Debian : utilisez apt")
+        src_target = str(src_entry)
+        shutil.rmtree(src_entry)
+        out(f"REMOVED:{src_entry}")
+    else:
+        raise HelperError(f"{src_entry} introuvable")
+
+    headers_target = None
+    if headers_entry.is_symlink():
+        headers_target = os.readlink(headers_entry)
+        headers_entry.unlink()
+        out(f"UNLINK:{headers_entry}")
+    elif headers_entry.exists():
+        out(f"HEADERS_KEPT:{headers_entry}")
+
+    _remove_main_link('linux', src_entry.name, src_target)
+    _remove_main_link('linux-headers', headers_entry.name, *(t for t in [headers_target] if t))
 
 
 # ==================== Signature d'un kernel ====================
@@ -367,6 +533,21 @@ def build_parser():
         if needs_key:
             p.add_argument('key')
         p.set_defaults(func=func)
+
+    p = sub.add_parser('sources-install', help='copier des sources dans /usr/src')
+    p.add_argument('source')
+    p.add_argument('--headers')
+    p.set_defaults(func=cmd_sources_install)
+
+    p = sub.add_parser('sources-link', help='lier des sources dans /usr/src (DKMS)')
+    p.add_argument('source')
+    p.add_argument('full_version')
+    p.add_argument('--headers')
+    p.set_defaults(func=cmd_sources_link)
+
+    p = sub.add_parser('sources-remove', help='supprimer des sources/liens de /usr/src')
+    p.add_argument('version')
+    p.set_defaults(func=cmd_sources_remove)
 
     p = sub.add_parser('sign-kernel', help='signer modules (+ vmlinuz) et régénérer l\'initrd')
     p.add_argument('version')
