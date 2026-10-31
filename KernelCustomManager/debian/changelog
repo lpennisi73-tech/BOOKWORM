@@ -1,3 +1,14 @@
+kernelcustom-manager (3.0.1) unstable; urgency=medium
+
+  * Traductions : plus aucun message en dur dans core/ et utils/.
+    - Pilotes GPU : progression, succès, erreurs, descriptions des paquets.
+    - SecureBoot : état, clés MOK, signature et son résumé. L'historique
+      enregistre un identifiant d'action, traduit à l'affichage.
+    - Erreurs PolicyKit, sources, nettoyage, message de migration.
+  * Tailles localisées : l'interface anglaise affichait « Mo » et « o ».
+
+ -- Kenny-Tech <contact@bookworm-mon0.org>  Sun, 01 Nov 2026 00:53:23 +0100
+
 kernelcustom-manager (3.0) unstable; urgency=medium
 
   * Release v3.0.

@@ -1,6 +1,6 @@
-# 🚀 KernelCustom Manager v3.0
+# 🚀 KernelCustom Manager v3.0.1
 
-[![Version](https://img.shields.io/badge/version-3.0-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
+[![Version](https://img.shields.io/badge/version-3.0.1-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
 [![Debian](https://img.shields.io/badge/Debian-14%20forky-a80030.svg)](https://www.debian.org/)
 [![Python](https://img.shields.io/badge/python-3-green.svg)](https://www.python.org/)
 [![GTK](https://img.shields.io/badge/GTK-4%20%2B%20libadwaita-orange.svg)](https://www.gtk.org/)
@@ -507,6 +507,11 @@ Avec l'aide de **Claude AI** (Anthropic) pour :
 ---
 
 ## 📅 Historique des Versions
+
+### v3.0.1 (2026-11-01) - Traductions 🌍
+- 🌍 Tous les messages des pilotes GPU, de SecureBoot, du nettoyage et des sources sont traduits (FR/EN)
+- 📜 Historique SecureBoot affiché dans la langue choisie
+- 🐛 Tailles affichées avec les unités françaises dans l'interface anglaise
 
 ### v3.0 (2026-11-01) - GTK4 + paquet Debian 📦
 - 🎨 **Interface GTK4 + libadwaita** : fenêtre adaptative, dialogues asynchrones, notifications de bureau
