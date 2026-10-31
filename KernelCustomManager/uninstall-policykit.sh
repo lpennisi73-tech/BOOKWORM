@@ -1,25 +1,15 @@
 #!/bin/bash
 #
-# Uninstall PolicyKit helper for KernelCustom Manager
+# Désinstalle les helpers privilégiés et la policy PolicyKit de KernelCustom Manager
 #
 
-echo "🔐 Désinstallation du helper PolicyKit..."
+echo "🔐 Désinstallation des helpers privilégiés..."
 
-# Remove helper script
-if sudo rm -f /usr/local/bin/kernelcustom-helper 2>/dev/null; then
-    echo "   ✓ Helper supprimé"
-else
-    echo "   ⚠️  Impossible de supprimer le helper (sudo requis)"
-fi
-
-# Remove PolicyKit rules
-if sudo rm -f /usr/share/polkit-1/actions/com.kernelcustom.manager.policy 2>/dev/null; then
-    echo "   ✓ Règles PolicyKit supprimées"
-else
-    echo "   ⚠️  Impossible de supprimer les règles PolicyKit (sudo requis)"
-fi
+sudo rm -rf /usr/libexec/kernelcustom-manager && echo "   ✓ Helpers supprimés"
+sudo rm -f /usr/local/bin/kernelcustom-helper
+sudo rm -f /usr/share/polkit-1/actions/com.kernelcustom.manager.policy && echo "   ✓ Règles PolicyKit supprimées"
 
 echo ""
 echo "✅ Désinstallation terminée"
-echo "   L'application continuera de fonctionner mais demandera"
-echo "   le mot de passe plus souvent (méthode standard pkexec)"
+echo "   Les opérations privilégiées (installation de kernels, SecureBoot, pilotes)"
+echo "   ne fonctionneront plus tant que ./install.sh n'aura pas été relancé."

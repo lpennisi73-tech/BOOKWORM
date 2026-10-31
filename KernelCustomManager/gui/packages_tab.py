@@ -5,7 +5,6 @@ Onglet de gestion des paquets locaux
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
-import subprocess
 import threading
 import re
 from pathlib import Path
@@ -172,28 +171,10 @@ def install_package(main_window, view, store):
             GLib.idle_add(lambda: progress.set_fraction(0.5))
             GLib.idle_add(lambda: progress.set_text("50%"))
 
-            # Use PolicyKit helper - only asks for password once
-            if PkexecHelper.is_helper_installed():
-                success, stdout, stderr = PkexecHelper.install_packages(*packages_to_install)
-                if not success:
-                    raise Exception(f"Installation failed: {stderr}")
-            else:
-                # Fallback to old method if helper not installed
-                for pkg in packages_to_install:
-                    result = subprocess.run(
-                        ["pkexec", "dpkg", "-i", pkg],
-                        capture_output=True,
-                        text=True
-                    )
-                    if result.returncode != 0:
-                        raise Exception(f"dpkg error: {result.stderr}")
-
-                subprocess.run(
-                    ["pkexec", "apt", "-f", "install", "-y"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
+            # Helper privilégié : apt-get install des .deb (dépendances résolues)
+            success, _, error = PkexecHelper.install_packages(*packages_to_install)
+            if not success:
+                raise Exception(error)
             
             GLib.idle_add(lambda: progress.set_fraction(1.0))
             GLib.idle_add(lambda: progress.set_text("100%"))

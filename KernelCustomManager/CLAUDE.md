@@ -23,8 +23,8 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 
 - [x] **1. CLAUDE.md** : plan et conventions (ce fichier)
 - [x] **2. Retrait d'Ubuntu** : `core/driver_manager.py`, `core/secureboot_manager.py`, `gui/build_tab_*.py`, `install.sh`, `scripts/secureboot/fix_mok_not_appearing.sh` (`EFI/debian`), doc et traductions
-- [ ] **3. Helper root en Python** : `kernelcustom-helper` réécrit en Python avec une **liste blanche d'actions** et la validation des chemins (uniquement dans `/usr/src`, le dossier de travail de l'utilisateur, `/boot`…). Supprimer `pkexec bash -c` (`gui/secureboot_tab.py`) et `shell=True` (`core/secureboot_manager.py`). Tous les `pkexec apt/dpkg/cp/systemctl` dispersés passent par le helper
-- [ ] **4. Portage du bash restant** : `manage_kernel_sources.sh` devient `core/sources_manager.py` (actions install, remove, link, unlink, list, exécutées via le helper). `scripts/secureboot/*.sh` est intégré dans `core/secureboot_manager.py` ou supprimé s'il fait doublon. `install_nvidia.sh` généré par `driver_manager.py` est remplacé par une action du helper
+- [x] **3. Helper root en Python** : `kernelcustom-helper` réécrit en Python avec une **liste blanche d'actions** et la validation des chemins (uniquement dans `/usr/src`, le dossier de travail de l'utilisateur, `/boot`…). Supprimer `pkexec bash -c` (`gui/secureboot_tab.py`) et `shell=True` (`core/secureboot_manager.py`). Tous les `pkexec apt/dpkg/cp/systemctl` dispersés passent par le helper
+- [ ] **4. Portage du bash restant** : `manage_kernel_sources.sh` devient `core/sources_manager.py` + des actions `sources-*` dans le helper (encore appelé via `pkexec` dans `gui/sources_tab.py`). `scripts/secureboot/*.sh` est intégré dans `core/secureboot_manager.py` ou supprimé s'il fait doublon. Le script de compilation généré puis lancé avec `bash -c` dans un terminal (`gui/build_tab_compile.py`, `gui/build_tab_config.py`, exécuté sans privilèges) est remplacé par un lanceur Python (`shlex.quote` / liste d'arguments)
 - [ ] **5. Chemins centralisés** : nouveau module `utils/paths.py` (dossier de l'app, traductions, icônes, helper, dossier de travail XDG + migration). Plus de `Path(__file__).parent.parent` ni de `/usr/local/bin` codé en dur ailleurs. L'app doit fonctionner **installée ET lancée depuis le dépôt git**
 - [ ] **6. Outil de nettoyage du dossier de travail** : `core/cleanup_manager.py` + une interface (onglet ou dialogue). Il liste avec leur taille les sources extraites, les arbres compilés, les archives `.tar.xz` téléchargées, les `.deb` générés, les logs et les fichiers pilotes. On peut les supprimer en sélection ou par catégorie, avec confirmation. **Il ne touche jamais** aux sources liées dans `/usr/src` ni au kernel en cours d'exécution (`uname -r`). Les clés MOK sont exclues par défaut
 - [ ] **7. Portage GTK4 + libadwaita** : onglet par onglet (voir la section dédiée). L'interface de l'outil de nettoyage est écrite directement en GTK4 si l'étape 6 arrive après le début du portage
@@ -33,12 +33,25 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 
 > **Priorité : le portage de l'application (étapes 2 à 7).** Le paquet .deb vient tout à la fin, une fois l'app stabilisée en Python pur + GTK4. En attendant, l'app se lance depuis le dépôt git (`install.sh` reste utilisable jusqu'à l'étape 8, avec la policy polkit qui pointe vers le chemin du helper défini dans `utils/paths.py`).
 
+## Opérations privilégiées (étape 3)
+
+- **Seul `utils/pkexec_helper.py` (`PkexecHelper`) appelle `pkexec`.** Interdit ailleurs : `pkexec` direct, `sudo`, `bash -c`, `shell=True`.
+- Le code des helpers est dans `helpers/` et ils sont installés dans `/usr/libexec/kernelcustom-manager/` (`root:root 0755`) par `install.sh` :
+  - `kernelcustom-helper` : liste blanche (`apt-install`, `install-debs`, `remove-packages`, `reboot`, `mokutil-*`, `sign-kernel`). Policy `com.kernelcustom.manager.helper` en `auth_admin_keep`.
+  - `kernelcustom-nvidia-installer` : `run`, `schedule`, `boot-install`, `cancel`, `uninstall`. Policy `com.kernelcustom.manager.nvidia` en `auth_admin`, qui redemande **toujours** le mot de passe. Le `.run` est copié dans `/var/lib/kernelcustom-manager/nvidia/` avant exécution.
+- Les helpers sont **autonomes** (`#!/usr/bin/python3 -I`, aucun import de l'app). Ils valident tout : noms de paquets, versions, fichiers **appartenant à l'utilisateur appelant** (`PKEXEC_UID`), `sign-file` appartenant à root avec ses dossiers parents non modifiables, vmlinuz dans `/boot`. Ils refusent de supprimer le kernel en cours d'exécution.
+- **Après une modification de `helpers/*`, il faut les réinstaller** (`./install.sh` ou `sudo install -m 0755 helpers/* /usr/libexec/kernelcustom-manager/`). L'app utilise toujours la copie installée.
+- Ajouter une opération root = une nouvelle action validée dans le helper + une méthode dans `PkexecHelper`. Documenter dans `docs/POLICYKIT_README.md`.
+- `modinfo` **ne nécessite pas root** et lit directement les `.ko.xz`/`.ko.zst` : pas de helper pour vérifier une signature.
+- Le `kmod` de Debian est compilé sans zlib : les modules `.ko.gz` ne sont pas lisibles par `modinfo` (Debian utilise xz/zstd).
+
 ## Disposition du paquet .deb
 
 ```
 /usr/bin/kernelcustom-manager                          → lanceur (script Python minimal)
 /usr/lib/kernelcustom-manager/                         → paquet Python (core, gui, utils) + translations
-/usr/libexec/kernelcustom-manager/kernelcustom-helper  → helper root (pkexec)
+/usr/libexec/kernelcustom-manager/kernelcustom-helper            → helper root (pkexec)
+/usr/libexec/kernelcustom-manager/kernelcustom-nvidia-installer  → installeur NVIDIA (pkexec, auth_admin)
 /usr/share/polkit-1/actions/com.kernelcustom.manager.policy
 /usr/share/applications/com.kernelcustom.manager.desktop
 /usr/share/icons/hicolor/scalable/apps/com.kernelcustom.manager.svg
@@ -46,7 +59,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 ```
 
 - Nom du paquet : `kernelcustom-manager`. Architecture `all`. Construction avec `dh $@ --with python3`.
-- La policy polkit pointe vers `/usr/libexec/kernelcustom-manager/kernelcustom-helper` (et non plus `/usr/local/bin`).
+- La policy polkit pointe déjà vers `/usr/libexec/kernelcustom-manager/` (fait à l'étape 3).
 - `Depends` : python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, policykit-1 (ou polkitd + pkexec), build-essential, bc, bison, flex, libssl-dev, libelf-dev, libncurses-dev, fakeroot, dpkg-dev, debhelper, rsync, kmod, curl, xz-utils, dkms
 - `Recommends` : mokutil, sbsigntool, shim-signed, firmware-amd-graphics
 - Aucun fichier écrit dans le `$HOME` à l'installation. Les données utilisateur sont créées au lancement.
@@ -76,16 +89,16 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 ## Conventions du code
 
 - **Langue** : code et commentaires en français (existant). **Tout texte affiché à l'utilisateur passe par `utils/i18n.py`**. Ajouter chaque clé dans `translations/fr.json` ET `translations/en.json`.
-- **Privilèges** : jamais de `sudo`. Uniquement `pkexec` + le helper, avec des **listes d'arguments**, jamais `shell=True` ni `bash -c` avec des données utilisateur.
+- **Privilèges** : uniquement via `PkexecHelper` (voir « Opérations privilégiées »).
 - **Structure** : la logique va dans `core/` (sans GTK), l'interface dans `gui/`, les utilitaires transverses dans `utils/`.
 - **Commits** : messages en français, préfixés `Fix:`, `Feat:`, `Refactor:`, `Release:`, `Docs:`.
 - Nettoyages en cours de route : `locale.getdefaultlocale()` (déprécié depuis Python 3.11+, à remplacer par `locale.getlocale()`) et les `except:` nus à remplacer par `except Exception:`.
 
 ## Dette repérée (à traiter pendant le portage)
 
-- `core/secureboot_manager.py` `_fetch_mok_data` : `print("[DEBUG] …")` + `traceback.print_stack()` laissés dans le code. À remplacer par `logging.debug`.
 - Un appel `pkexec` (mokutil-diagnose) est lancé **au démarrage** par l'onglet SecureBoot. Il faudrait le différer jusqu'à l'ouverture de l'onglet ou une action de l'utilisateur.
-- `gui/drivers_tab.py` (fin de l'installation NVIDIA) : `response = GLib.idle_add(lambda: show_question(...))` renvoie un id de source GLib et non la réponse, donc le redémarrage proposé n'est jamais lancé. Ce sera corrigé naturellement avec les dialogues async GTK4.
+- `utils/dialogs.py` `show_question()` renvoie un **booléen** : ne jamais le comparer à `Gtk.ResponseType` (bug corrigé à l'étape 3 dans `drivers_tab.py`, où l'installation, la suppression et le rollback ne pouvaient jamais aboutir). À garder en tête pour l'API async GTK4.
+- `gui/secureboot_tab.py` contient encore de nombreux `print("[DEBUG GUI] …")` : à passer en `logging`.
 - `docs/ARCHITECTURE.md` : décrit encore GTK3, Ubuntu et AMD. À réécrire à l'étape Release.
 - `install.sh` : installe `debhelper-compat` (paquet virtuel). À revoir avec `debian/control` à l'étape 8.
 

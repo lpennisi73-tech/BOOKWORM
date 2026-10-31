@@ -166,26 +166,10 @@ def remove_kernel(main_window, view, store):
             GLib.idle_add(lambda: progress.set_fraction(0.5))
             GLib.idle_add(lambda: progress.set_text("50%"))
 
-            # Use PolicyKit helper - only asks for password once
-            if PkexecHelper.is_helper_installed():
-                success, stdout, stderr = PkexecHelper.remove_packages(*related_packages)
-                if not success:
-                    raise Exception(f"Removal failed: {stderr}")
-            else:
-                # Fallback to old method if helper not installed
-                subprocess.run(
-                    ["pkexec", "apt", "purge", "-y"] + related_packages,
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-
-                subprocess.run(
-                    ["pkexec", "apt", "autoremove", "-y"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
+            # Helper privilégié (refuse de supprimer le kernel en cours d'exécution)
+            success, _, error = PkexecHelper.remove_packages(*related_packages, autoremove=True)
+            if not success:
+                raise Exception(error)
 
             GLib.idle_add(lambda: progress.set_fraction(1.0))
             GLib.idle_add(lambda: progress.set_text("100%"))
@@ -215,13 +199,8 @@ def reboot_system(main_window):
         i18n._("message.confirm.reboot")
     ):
         try:
-            # Use PolicyKit helper - only asks for password once
-            if PkexecHelper.is_helper_installed():
-                success, stdout, stderr = PkexecHelper.reboot()
-                if not success:
-                    raise Exception(f"Reboot failed: {stderr}")
-            else:
-                # Fallback to old method if helper not installed
-                subprocess.run(["pkexec", "systemctl", "reboot"], check=True)
+            success, _, error = PkexecHelper.reboot()
+            if not success:
+                raise Exception(error)
         except Exception as e:
             main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.reboot_failed", error=str(e)))

@@ -13,6 +13,8 @@ import os
 import logging
 import threading
 import platform
+
+from utils.pkexec_helper import PkexecHelper
 from utils.i18n import get_i18n
 
 # Configurer le logging
@@ -217,11 +219,8 @@ class SecureBootManager:
         Récupère toutes les données MOK en une seule commande (évite de demander le mot de passe plusieurs fois)
         Returns: dict avec enrolled_output et pending_output
         """
-        import traceback
-
         # Vérifier le cache sans lock d'abord (optimisation)
         if self._mok_cache is not None:
-            print(f"[DEBUG] _fetch_mok_data: Using CACHE (instance id: {id(self)})")
             return self._mok_cache
 
         # Utiliser un lock pour éviter les appels parallèles
@@ -229,23 +228,16 @@ class SecureBootManager:
             # Re-vérifier le cache après avoir acquis le lock
             # (un autre thread a pu le remplir pendant qu'on attendait le lock)
             if self._mok_cache is not None:
-                print(f"[DEBUG] _fetch_mok_data: Using CACHE after lock (instance id: {id(self)})")
                 return self._mok_cache
 
-            print(f"[DEBUG] _fetch_mok_data: CALLING pkexec (instance id: {id(self)})")
-            print(f"[DEBUG] Stack trace:")
-            traceback.print_stack()
+            logging.debug("_fetch_mok_data: appel du helper (mokutil-diagnose)")
 
             try:
-                result = subprocess.run(
-                    ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-diagnose"],
-                    capture_output=True, text=True, check=False
-                )
+                success, output, error = PkexecHelper.mokutil_diagnose()
 
-                if result.returncode != 0:
+                if not success:
+                    logging.warning(f"mokutil-diagnose: {error}")
                     return {'enrolled_output': '', 'pending_output': ''}
-
-                output = result.stdout
 
                 # Parser la sortie pour séparer ENROLLED et PENDING
                 enrolled_output = ''
@@ -394,26 +386,8 @@ class SecureBootManager:
             }
 
         try:
-            # Importer la clé avec pkexec via le helper
-            cmd = ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-import", str(mok_key)]
-
-            if password:
-                # Mode non-interactif (si supporté par mokutil)
-                process = subprocess.Popen(
-                    cmd,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                stdout, stderr = process.communicate(input=f"{password}\n{password}\n")
-                success = process.returncode == 0
-                error_msg = stderr if stderr else ""
-            else:
-                # Mode interactif (terminal)
-                result = subprocess.run(cmd, check=True)
-                success = result.returncode == 0
-                error_msg = ""
+            # Importer la clé via le helper (le mot de passe temporaire est transmis sur stdin)
+            success, _, error_msg = PkexecHelper.mokutil_import(mok_key, password=password)
 
             if success:
                 self.add_to_history(
@@ -512,26 +486,21 @@ class SecureBootManager:
         try:
             # mokutil --import demande un mot de passe interactivement
             # On ne peut pas l'automatiser complètement
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-import", str(key_path)],
-                capture_output=True,
-                text=True,
-                check=False
-            )
+            success, stdout, error = PkexecHelper.mokutil_import(key_path)
 
-            if result.returncode == 0:
+            if success:
                 self.add_to_history(
                     'import_key',
-                    {'key_file': str(key_path), 'output': result.stdout},
+                    {'key_file': str(key_path), 'output': stdout},
                     success=True
                 )
                 return {
                     'success': True,
                     'message': 'Key import initiated. Reboot required to complete enrollment.',
-                    'output': result.stdout
+                    'output': stdout
                 }
             else:
-                return {'success': False, 'error': result.stderr}
+                return {'success': False, 'error': error}
         except FileNotFoundError:
             return {'success': False, 'error': 'mokutil is not installed'}
 
@@ -545,48 +514,38 @@ class SecureBootManager:
             return {'success': False, 'error': f'Key file not found: {key_file}'}
 
         try:
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-delete", str(key_path)],
-                capture_output=True,
-                text=True,
-                check=False
-            )
+            success, stdout, error = PkexecHelper.mokutil_delete(key_path)
 
-            if result.returncode == 0:
+            if success:
                 self.add_to_history(
                     'delete_key',
-                    {'key_file': str(key_path), 'output': result.stdout},
+                    {'key_file': str(key_path), 'output': stdout},
                     success=True
                 )
                 return {
                     'success': True,
                     'message': 'Key deletion initiated. Reboot required to complete.',
-                    'output': result.stdout
+                    'output': stdout
                 }
             else:
-                return {'success': False, 'error': result.stderr}
+                return {'success': False, 'error': error}
         except FileNotFoundError:
             return {'success': False, 'error': 'mokutil is not installed'}
 
     def reset_mok_keys(self):
         """Réinitialise toutes les clés MOK"""
         try:
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "mokutil-reset"],
-                capture_output=True,
-                text=True,
-                check=False
-            )
+            success, stdout, error = PkexecHelper.mokutil_reset()
 
-            if result.returncode == 0:
-                self.add_to_history('reset_keys', {'output': result.stdout}, success=True)
+            if success:
+                self.add_to_history('reset_keys', {'output': stdout}, success=True)
                 return {
                     'success': True,
                     'message': 'MOK reset initiated. Reboot required.',
-                    'output': result.stdout
+                    'output': stdout
                 }
             else:
-                return {'success': False, 'error': result.stderr}
+                return {'success': False, 'error': error}
         except FileNotFoundError:
             return {'success': False, 'error': 'mokutil is not installed'}
 
@@ -911,311 +870,28 @@ class SecureBootManager:
 
     def check_module_signed(self, module_path):
         """
-        Vérifie si un module est signé (gère la compression)
+        Vérifie si un module est signé.
+        modinfo (libkmod) lit directement les modules compressés (.xz/.gz/.zst)
+        et ne nécessite pas les droits root.
         Returns: dict avec signed (bool), signer (str), sig_id (str)
         """
-        import tempfile
-
-        module = Path(module_path)
-        module_to_check = module
-        temp_file = None
-
+        not_signed = {'signed': False, 'signer': None, 'sig_id': None}
         try:
-            # Décompresser le module si nécessaire (pour Debian 13 et autres distros)
-            if module.suffix == '.xz':
-                temp_file = tempfile.NamedTemporaryFile(suffix='.ko', delete=False)
-                temp_file.close()
-                subprocess.run(['xz', '-d', '-c', str(module)],
-                             stdout=open(temp_file.name, 'wb'),
-                             check=False, stderr=subprocess.DEVNULL)
-                module_to_check = Path(temp_file.name)
-            elif module.suffix == '.gz':
-                temp_file = tempfile.NamedTemporaryFile(suffix='.ko', delete=False)
-                temp_file.close()
-                subprocess.run(['gzip', '-d', '-c', str(module)],
-                             stdout=open(temp_file.name, 'wb'),
-                             check=False, stderr=subprocess.DEVNULL)
-                module_to_check = Path(temp_file.name)
-            elif module.suffix == '.zst':
-                temp_file = tempfile.NamedTemporaryFile(suffix='.ko', delete=False)
-                temp_file.close()
-                subprocess.run(['zstd', '-d', '-c', str(module), '-o', temp_file.name],
-                             check=False, stderr=subprocess.DEVNULL)
-                module_to_check = Path(temp_file.name)
+            fields = {}
+            for field in ('sig_id', 'signer'):
+                result = subprocess.run(
+                    ['modinfo', '-F', field, str(module_path)],
+                    capture_output=True, text=True, check=False
+                )
+                if result.returncode != 0:
+                    return not_signed
+                fields[field] = result.stdout.strip()
+        except FileNotFoundError:
+            return not_signed
 
-            # Vérifier la signature avec modinfo
-            # NOTE: modinfo nécessite root pour lire les infos de signature (Debian 13)
-            # On utilise le helper pour éviter de multiples demandes de mot de passe
-            result = subprocess.run(
-                ["pkexec", "/usr/local/bin/kernelcustom-helper", "modinfo-check", str(module_to_check)],
-                capture_output=True, text=True, check=False
-            )
-
-            if result.returncode != 0:
-                return {'signed': False, 'signer': None, 'sig_id': None}
-
-            # Parser la sortie: SIG_ID:xxx\nSIGNER:yyy
-            output = result.stdout
-            sig_id = None
-            signer = None
-
-            for line in output.split('\n'):
-                if line.startswith('SIG_ID:'):
-                    sig_id = line.replace('SIG_ID:', '').strip()
-                elif line.startswith('SIGNER:'):
-                    signer = line.replace('SIGNER:', '').strip()
-
-            if not sig_id:
-                return {'signed': False, 'signer': None, 'sig_id': None}
-
-            return {
-                'signed': True,
-                'signer': signer if signer else None,
-                'sig_id': sig_id
-            }
-        except:
-            return {'signed': False, 'signer': None, 'sig_id': None}
-        finally:
-            # Nettoyer le fichier temporaire
-            if temp_file and Path(temp_file.name).exists():
-                try:
-                    os.unlink(temp_file.name)
-                except:
-                    pass
-
-    def resign_kernel_modules(self, kernel_version, progress_callback=None):
-        """
-        Re-signe tous les modules d'un kernel avec la clé MOK
-        Args:
-            kernel_version: Version du kernel (ex: "6.17.10-kernelcustom")
-            progress_callback: Fonction appelée pour chaque module (current, total, module_name)
-        Returns: dict avec success, signed_count, failed_count, errors
-        """
-        logging.info(f"=== Starting module signing for {kernel_version} ===")
-
-        mok_priv = self.keys_dir / "MOK.priv"
-        mok_cert = self.keys_dir / "MOK.der"
-
-        logging.debug(f"MOK priv: {mok_priv} (exists: {mok_priv.exists()})")
-        logging.debug(f"MOK cert: {mok_cert} (exists: {mok_cert.exists()})")
-
-        if not mok_priv.exists() or not mok_cert.exists():
-            logging.error("MOK keys not found")
-            return {
-                'success': False,
-                'message': 'MOK keys not found',
-                'signed_count': 0,
-                'failed_count': 0,
-                'errors': []
-            }
-
-        # Trouver sign-file
-        sign_file = self._find_sign_file_tool()
-        logging.debug(f"sign-file tool: {sign_file}")
-
-        if not sign_file:
-            logging.error("sign-file tool not found")
-            return {
-                'success': False,
-                'message': 'sign-file tool not found',
-                'signed_count': 0,
-                'failed_count': 0,
-                'errors': []
-            }
-
-        # Trouver les modules
-        kernel_dir = Path(f"/lib/modules/{kernel_version}")
-        logging.debug(f"Kernel dir: {kernel_dir} (exists: {kernel_dir.exists()})")
-
-        if not kernel_dir.exists():
-            logging.error(f"Kernel directory not found: {kernel_dir}")
-            return {
-                'success': False,
-                'message': f'Kernel directory not found: {kernel_dir}',
-                'signed_count': 0,
-                'failed_count': 0,
-                'errors': []
-            }
-
-        # Trouver tous les modules (incluant les modules compressés)
-        modules = []
-        for ext in ['*.ko', '*.ko.xz', '*.ko.gz', '*.ko.zst']:
-            modules.extend(kernel_dir.rglob(ext))
-        total = len(modules)
-        logging.info(f"Found {total} modules to sign")
-
-        signed = 0
-        failed = 0
-        errors = []
-
-        # Créer un script pour signer tous les modules avec pkexec (nécessaire pour /lib/modules)
-        import tempfile
-
-        script_content = f"""#!/bin/bash
-
-SIGN_FILE="{sign_file}"
-MOK_PRIV="{mok_priv}"
-MOK_CERT="{mok_cert}"
-KERNEL_DIR="{kernel_dir}"
-TOTAL={total}
-
-signed=0
-failed=0
-current=0
-
-# Fonction pour signer un module (gère la compression)
-sign_module() {{
-    local module="$1"
-    local compressed=false
-    local compression_type=""
-    local ko_file="$module"
-
-    # Détecter le type de compression
-    if [[ "$module" == *.ko.xz ]]; then
-        compressed=true
-        compression_type="xz"
-        ko_file="${{module%.xz}}"
-        xz -d -k "$module" 2>/dev/null || return 1
-    elif [[ "$module" == *.ko.gz ]]; then
-        compressed=true
-        compression_type="gz"
-        ko_file="${{module%.gz}}"
-        gzip -d -k "$module" 2>/dev/null || return 1
-    elif [[ "$module" == *.ko.zst ]]; then
-        compressed=true
-        compression_type="zst"
-        ko_file="${{module%.zst}}"
-        zstd -d -q "$module" -o "$ko_file" 2>/dev/null || return 1
-    fi
-
-    # Signer le module .ko
-    if "$SIGN_FILE" sha256 "$MOK_PRIV" "$MOK_CERT" "$ko_file" 2>/dev/null; then
-        # Si le module était compressé, le recompresser
-        if [ "$compressed" = true ]; then
-            case "$compression_type" in
-                xz)
-                    rm -f "$module"
-                    xz -z -k "$ko_file" 2>/dev/null
-                    rm -f "$ko_file"
-                    ;;
-                gz)
-                    rm -f "$module"
-                    gzip -c "$ko_file" > "$module" 2>/dev/null
-                    rm -f "$ko_file"
-                    ;;
-                zst)
-                    rm -f "$module"
-                    zstd -q "$ko_file" -o "$module" 2>/dev/null
-                    rm -f "$ko_file"
-                    ;;
-            esac
-        fi
-        return 0
-    else
-        # Nettoyer en cas d'échec
-        [ "$compressed" = true ] && [ -f "$ko_file" ] && rm -f "$ko_file"
-        return 1
-    fi
-}}
-
-# Trouver et signer tous les modules (incluant compressés)
-while IFS= read -r -d '' module; do
-    ((current++))
-
-    # Extraire le nom du module (basename)
-    module_name=$(basename "$module")
-
-    if sign_module "$module"; then
-        ((signed++))
-    else
-        ((failed++))
-    fi
-
-    # Afficher la progression avec le nom du module
-    echo "PROGRESS:$current:$TOTAL:$module_name"
-done < <(find "$KERNEL_DIR" \\( -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.gz" -o -name "*.ko.zst" \\) -print0)
-
-echo "SIGNED:$signed"
-echo "FAILED:$failed"
-"""
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as tf:
-            tf.write(script_content)
-            script_path = tf.name
-
-        logging.debug(f"Created batch signing script: {script_path}")
-        os.chmod(script_path, 0o755)
-
-        # Exécuter avec pkexec et suivre la progression
-        logging.info("Executing batch module signing with pkexec...")
-
-        process = subprocess.Popen(
-            ["pkexec", "bash", script_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
-
-        # Lire la sortie en temps réel
-        stdout_lines = []
-        while True:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
-            if line:
-                line = line.strip()
-                stdout_lines.append(line)
-
-                # Mettre à jour la progression
-                if line.startswith('PROGRESS:'):
-                    parts = line.split(':')
-                    current = int(parts[1])
-                    total_modules = int(parts[2])
-                    module_name = parts[3] if len(parts) > 3 else ""
-                    if progress_callback:
-                        progress_callback(current, total_modules, module_name)
-                    logging.debug(f"Progress: {current}/{total_modules} - {module_name}")
-
-        process.wait()
-
-        # Nettoyer
-        try:
-            os.unlink(script_path)
-        except:
-            pass
-
-        logging.debug(f"Batch signing result: returncode={process.returncode}")
-
-        # Parser les résultats
-        if process.returncode == 0:
-            for line in stdout_lines:
-                if line.startswith('SIGNED:'):
-                    signed = int(line.split(':')[1])
-                elif line.startswith('FAILED:'):
-                    failed = int(line.split(':')[1])
-        else:
-            # Si le script échoue, tous les modules sont en échec
-            failed = total
-            logging.error(f"Batch signing script failed: {process.stderr.read()}")
-
-        success = failed == 0
-
-        logging.info(f"Module signing completed: {signed} signed, {failed} failed")
-
-        self.add_to_history(
-            "Module Signing",
-            f"Kernel {kernel_version}: {signed} signed, {failed} failed",
-            success=success
-        )
-
-        return {
-            'success': success,
-            'message': f'Signed {signed}/{total} modules',
-            'signed_count': signed,
-            'failed_count': failed,
-            'errors': errors
-        }
+        if not fields['sig_id']:
+            return not_signed
+        return {'signed': True, 'signer': fields['signer'] or None, 'sig_id': fields['sig_id']}
 
     def _find_vmlinuz_for_kernel(self, kernel_version):
         """
@@ -1273,253 +949,6 @@ echo "FAILED:$failed"
 
         logging.warning(f"No vmlinuz found for kernel {kernel_version}")
         return None
-
-    def sign_vmlinuz(self, kernel_version, progress_callback=None):
-        """
-        Signe l'image vmlinuz d'un kernel avec la clé MOK
-        Args:
-            kernel_version: Version du kernel (ex: "6.17.10-kernelcustom")
-            progress_callback: Fonction appelée pour suivre le progrès
-        Returns: dict avec success, message
-        """
-        logging.info(f"=== Starting vmlinuz signing for {kernel_version} ===")
-
-        # Vérifier si la signature vmlinuz est supportée sur cette architecture
-        if not self._is_vmlinuz_signing_supported():
-            arch = platform.machine()
-            logging.warning(f"vmlinuz signing not supported on architecture: {arch}")
-            return {
-                'success': False,
-                'message': f'vmlinuz signing not supported on {arch} architecture. '
-                          f'sbsign only works with PE/COFF format kernels (x86/x86_64). '
-                          f'ARM kernels use different boot formats. Module signing will still work.'
-            }
-
-        mok_priv = self.keys_dir / "MOK.priv"
-        mok_cert = self.keys_dir / "MOK.pem"
-
-        logging.debug(f"MOK priv key: {mok_priv} (exists: {mok_priv.exists()})")
-        logging.debug(f"MOK cert: {mok_cert} (exists: {mok_cert.exists()})")
-
-        if not mok_priv.exists() or not mok_cert.exists():
-            logging.error("MOK keys not found")
-            return {
-                'success': False,
-                'message': 'MOK keys not found. Generate keys first.'
-            }
-
-        # Trouver l'image vmlinuz avec recherche intelligente
-        vmlinuz_path = self._find_vmlinuz_for_kernel(kernel_version)
-
-        if not vmlinuz_path:
-            # Chercher dans /boot/ pour aider au debugging
-            boot_files = list(Path("/boot").glob("vmlinuz-*"))
-            boot_files_str = "\n  ".join([f.name for f in boot_files[:10]])
-            logging.error(f"vmlinuz not found for {kernel_version}")
-            logging.debug(f"Available vmlinuz files in /boot/:\n  {boot_files_str}")
-            return {
-                'success': False,
-                'message': f'vmlinuz not found for kernel {kernel_version}. Available files: {", ".join([f.name for f in boot_files[:5]])}'
-            }
-
-        # Vérifier que sbsign est installé
-        sbsign_available = self._check_command('sbsign')
-        logging.debug(f"sbsign available: {sbsign_available}")
-
-        if not sbsign_available:
-            logging.error("sbsign not installed")
-            return {
-                'success': False,
-                'message': 'sbsign not installed. Install sbsigntool package.'
-            }
-
-        try:
-            if progress_callback:
-                progress_callback(0, 100, "Creating backup")
-
-            # Créer un script temporaire pour exécuter avec pkexec
-            import tempfile
-
-            # Résoudre les chemins absolus (important pour pkexec)
-            mok_priv_abs = mok_priv.resolve()
-            mok_cert_abs = mok_cert.resolve()
-            vmlinuz_path_abs = vmlinuz_path.resolve()
-
-            logging.debug(f"Absolute paths:")
-            logging.debug(f"  MOK_PRIV: {mok_priv_abs}")
-            logging.debug(f"  MOK_CERT: {mok_cert_abs}")
-            logging.debug(f"  VMLINUZ: {vmlinuz_path_abs}")
-
-            script_content = f"""#!/bin/bash
-set -e
-
-# Chemins absolus
-MOK_PRIV="{mok_priv_abs}"
-MOK_CERT="{mok_cert_abs}"
-VMLINUZ="{vmlinuz_path_abs}"
-
-# Vérifier que les fichiers existent
-if [ ! -f "$MOK_PRIV" ]; then
-    echo "ERROR: MOK private key not found: $MOK_PRIV"
-    exit 1
-fi
-
-if [ ! -f "$MOK_CERT" ]; then
-    echo "ERROR: MOK certificate not found: $MOK_CERT"
-    exit 1
-fi
-
-if [ ! -f "$VMLINUZ" ]; then
-    echo "ERROR: vmlinuz not found: $VMLINUZ"
-    exit 1
-fi
-
-# Signer l'image
-sbsign --key "$MOK_PRIV" --cert "$MOK_CERT" --output "${{VMLINUZ}}.signed" "$VMLINUZ" 2>&1
-
-# Remplacer l'original
-mv "${{VMLINUZ}}.signed" "$VMLINUZ"
-
-echo "SUCCESS"
-"""
-
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as tf:
-                tf.write(script_content)
-                script_path = tf.name
-
-            logging.debug(f"Script created: {script_path}")
-            logging.debug(f"Script content:\n{script_content}")
-
-            # Rendre le script exécutable
-            os.chmod(script_path, 0o755)
-
-            if progress_callback:
-                progress_callback(30, 100, "Signing vmlinuz")
-
-            logging.info(f"Executing: pkexec bash {script_path}")
-
-            # Exécuter le script avec pkexec
-            result = subprocess.run([
-                "pkexec",
-                "bash",
-                script_path
-            ], capture_output=True, text=True, check=False)
-
-            logging.debug(f"Script execution completed with returncode: {result.returncode}")
-            logging.debug(f"STDOUT:\n{result.stdout}")
-            logging.debug(f"STDERR:\n{result.stderr}")
-
-            # Nettoyer le script temporaire
-            try:
-                os.unlink(script_path)
-                logging.debug(f"Cleaned up script: {script_path}")
-            except Exception as e:
-                logging.warning(f"Failed to cleanup script: {e}")
-
-            # Vérifier le résultat
-            if result.returncode != 0 or "SUCCESS" not in result.stdout:
-                error_msg = result.stderr if result.stderr else result.stdout
-                logging.error(f"Signing failed: {error_msg}")
-                return {
-                    'success': False,
-                    'message': f'Failed to sign vmlinuz: {error_msg}'
-                }
-
-            if progress_callback:
-                progress_callback(90, 100, "Verifying signature")
-
-            # Vérifier la signature (optionnel, ne pas échouer si sbverify n'est pas installé)
-            verified = False
-            if self._check_command('sbverify'):
-                verify_result = subprocess.run([
-                    "sbverify",
-                    "--cert", str(mok_cert),
-                    str(vmlinuz_path)
-                ], capture_output=True, text=True, check=False)
-                verified = verify_result.returncode == 0
-            else:
-                # Si sbverify n'est pas installé, on considère la signature réussie
-                verified = True
-
-            if progress_callback:
-                progress_callback(100, 100, "Done")
-
-            self.add_to_history(
-                "vmlinuz Signing",
-                f"Signed vmlinuz-{kernel_version}, verified={verified}",
-                success=True
-            )
-
-            logging.info(f"vmlinuz signing completed successfully for {kernel_version}")
-
-            return {
-                'success': True,
-                'message': f'vmlinuz signed successfully. Verified: {verified}',
-                'verified': verified
-            }
-
-        except subprocess.CalledProcessError as e:
-            logging.error(f"CalledProcessError: {e}")
-            logging.error(f"  stderr: {e.stderr if e.stderr else 'None'}")
-            return {
-                'success': False,
-                'message': f'Failed to sign vmlinuz: {e.stderr if e.stderr else str(e)}'
-            }
-        except Exception as e:
-            logging.error(f"Unexpected error: {e}", exc_info=True)
-            return {
-                'success': False,
-                'message': f'Error: {str(e)}'
-            }
-
-    def sign_all_custom_vmlinuz(self, progress_callback=None):
-        """
-        Signe tous les vmlinuz des kernels custom
-        Returns: dict avec success, signed_count, failed_count, results
-        """
-        custom_kernels = self.get_custom_kernels()
-
-        if not custom_kernels:
-            return {
-                'success': False,
-                'message': 'No custom kernels found',
-                'signed_count': 0,
-                'failed_count': 0,
-                'results': []
-            }
-
-        signed_count = 0
-        failed_count = 0
-        results = []
-
-        total = len(custom_kernels)
-        for i, kernel in enumerate(custom_kernels, 1):
-            kernel_ver = kernel['kernel_version']
-
-            if progress_callback:
-                progress_callback(i, total, kernel_ver)
-
-            result = self.sign_vmlinuz(kernel_ver)
-            results.append({
-                'kernel': kernel_ver,
-                'success': result['success'],
-                'message': result['message']
-            })
-
-            if result['success']:
-                signed_count += 1
-            else:
-                failed_count += 1
-
-        return {
-            'success': failed_count == 0,
-            'message': f'Signed {signed_count}/{total} vmlinuz images',
-            'signed_count': signed_count,
-            'failed_count': failed_count,
-            'results': results
-        }
-
-    # ==================== Diagnostic automatique ====================
 
     def _check_kernel_modules_signature_stats(self, kernel_version, sample_size=20):
         """
@@ -1597,14 +1026,13 @@ echo "SUCCESS"
 
                 if result.returncode != 0:
                     # Si unmkinitramfs échoue, essayer avec cpio
-                    result2 = subprocess.run(
-                        f'cd {tmpdir_path} && zcat {initrd_path} | cpio -id 2>/dev/null',
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        check=False
-                    )
-                    if result2.returncode != 0:
+                    zcat = subprocess.Popen(['zcat', str(initrd_path)], stdout=subprocess.PIPE,
+                                            stderr=subprocess.DEVNULL)
+                    cpio = subprocess.run(['cpio', '-id'], stdin=zcat.stdout, cwd=tmpdir_path,
+                                          capture_output=True, check=False)
+                    zcat.stdout.close()
+                    zcat.wait()
+                    if cpio.returncode != 0 or zcat.returncode != 0:
                         return {
                             'success': False,
                             'initrd_ok': None,
@@ -1901,100 +1329,9 @@ echo "SUCCESS"
         status = self.get_secureboot_status()
         return status.get('enabled', False)
 
-    def find_kernel_modules_in_package(self, package_dir):
-        """
-        Trouve tous les modules kernel (.ko) dans un répertoire de package
-        """
-        from pathlib import Path
-        package_path = Path(package_dir)
-
-        modules = []
-        for ko_file in package_path.rglob("*.ko"):
-            modules.append(ko_file)
-
-        return modules
-
-    def auto_sign_kernel_modules(self, kernel_dir, priv_key_path, cert_path):
-        """
-        Signe automatiquement tous les modules d'un kernel compilé
-        kernel_dir: répertoire du kernel compilé
-        priv_key_path: chemin vers la clé privée
-        cert_path: chemin vers le certificat
-        """
-        from pathlib import Path
-        kernel_path = Path(kernel_dir)
-
-        # Trouver tous les modules .ko
-        modules = list(kernel_path.rglob("*.ko"))
-
-        if not modules:
-            return {
-                'success': False,
-                'error': 'No kernel modules found',
-                'signed_count': 0
-            }
-
-        priv_key = Path(priv_key_path)
-        cert = Path(cert_path)
-
-        if not priv_key.exists() or not cert.exists():
-            return {
-                'success': False,
-                'error': 'Key or certificate not found',
-                'signed_count': 0
-            }
-
-        # Trouver sign-file
-        sign_file = self._find_sign_file_tool()
-        if not sign_file:
-            return {
-                'success': False,
-                'error': 'sign-file tool not found',
-                'signed_count': 0
-            }
-
-        # Signer tous les modules
-        signed_count = 0
-        failed_modules = []
-
-        for module in modules:
-            try:
-                result = subprocess.run([
-                    str(sign_file),
-                    "sha256",
-                    str(priv_key),
-                    str(cert),
-                    str(module)
-                ], capture_output=True, text=True, check=False)
-
-                if result.returncode == 0:
-                    signed_count += 1
-                else:
-                    failed_modules.append(str(module))
-            except Exception as e:
-                failed_modules.append(str(module))
-
-        self.add_to_history(
-            'auto_sign_modules',
-            {
-                'kernel_dir': str(kernel_dir),
-                'total_modules': len(modules),
-                'signed_count': signed_count,
-                'failed_count': len(failed_modules)
-            },
-            success=(len(failed_modules) == 0)
-        )
-
-        return {
-            'success': (len(failed_modules) == 0),
-            'total_modules': len(modules),
-            'signed_count': signed_count,
-            'failed_modules': failed_modules
-        }
-
     def sign_kernel_complete(self, kernel_version, sign_vmlinuz_flag=True, progress_callback=None):
         """
-        Signe les modules ET vmlinuz d'un kernel dans une seule session pkexec
+        Signe les modules ET vmlinuz d'un kernel en un seul appel au helper privilégié
         (évite de redemander le mot de passe entre les deux étapes)
 
         Args:
@@ -2064,206 +1401,57 @@ echo "SUCCESS"
         total_modules = len(modules)
         logging.info(f"Found {total_modules} modules to sign")
 
-        # Créer un script bash unique qui signe modules + vmlinuz
-        import tempfile
-
-        script_content = f"""#!/bin/bash
-
-SIGN_FILE="{sign_file}"
-MOK_PRIV="{mok_priv.resolve()}"
-MOK_CERT_DER="{mok_cert_der.resolve()}"
-MOK_CERT_PEM="{mok_cert_pem.resolve()}"
-KERNEL_DIR="{kernel_dir}"
-TOTAL_MODULES={total_modules}
-
-signed_modules=0
-failed_modules=0
-current=0
-
-# Fonction pour signer un module (gère la compression)
-sign_module() {{
-    local module="$1"
-    local compressed=false
-    local compression_type=""
-    local ko_file="$module"
-
-    # Détecter le type de compression
-    if [[ "$module" == *.ko.xz ]]; then
-        compressed=true
-        compression_type="xz"
-        ko_file="${{module%.xz}}"
-        xz -d -k "$module" 2>/dev/null || return 1
-    elif [[ "$module" == *.ko.gz ]]; then
-        compressed=true
-        compression_type="gz"
-        ko_file="${{module%.gz}}"
-        gzip -d -k "$module" 2>/dev/null || return 1
-    elif [[ "$module" == *.ko.zst ]]; then
-        compressed=true
-        compression_type="zst"
-        ko_file="${{module%.zst}}"
-        zstd -d -q "$module" -o "$ko_file" 2>/dev/null || return 1
-    fi
-
-    # Signer le module .ko
-    if "$SIGN_FILE" sha256 "$MOK_PRIV" "$MOK_CERT_DER" "$ko_file" 2>/dev/null; then
-        # Si le module était compressé, le recompresser
-        if [ "$compressed" = true ]; then
-            case "$compression_type" in
-                xz)
-                    rm -f "$module"
-                    xz -z -k "$ko_file" 2>/dev/null
-                    rm -f "$ko_file"
-                    ;;
-                gz)
-                    rm -f "$module"
-                    gzip -c "$ko_file" > "$module" 2>/dev/null
-                    rm -f "$ko_file"
-                    ;;
-                zst)
-                    rm -f "$module"
-                    zstd -q "$ko_file" -o "$module" 2>/dev/null
-                    rm -f "$ko_file"
-                    ;;
-            esac
-        fi
-        return 0
-    else
-        # Nettoyer en cas d'échec
-        [ "$compressed" = true ] && [ -f "$ko_file" ] && rm -f "$ko_file"
-        return 1
-    fi
-}}
-
-# Signer tous les modules
-while IFS= read -r -d '' module; do
-    ((current++))
-    module_name=$(basename "$module")
-
-    if sign_module "$module"; then
-        ((signed_modules++))
-    else
-        ((failed_modules++))
-    fi
-
-    # Afficher la progression
-    echo "PROGRESS_MODULE:$current:$TOTAL_MODULES:$module_name"
-done < <(find "$KERNEL_DIR" \\( -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.gz" -o -name "*.ko.zst" \\) -print0)
-
-echo "MODULES_SIGNED:$signed_modules"
-echo "MODULES_FAILED:$failed_modules"
-"""
-
-        # Ajouter la signature de vmlinuz si nécessaire
+        # Une seule action du helper : modules + vmlinuz + initrd (un seul mot de passe)
+        args = [
+            kernel_version,
+            "--sign-file", sign_file,
+            "--key", mok_priv.resolve(),
+            "--cert-der", mok_cert_der.resolve(),
+        ]
         if sign_vmlinuz_flag and vmlinuz_path:
-            script_content += f"""
-# Signer vmlinuz
-VMLINUZ="{vmlinuz_path.resolve()}"
-vmlinuz_signed=0
+            args += ["--cert-pem", mok_cert_pem.resolve(), "--vmlinuz", vmlinuz_path.resolve()]
 
-echo "PROGRESS_VMLINUZ:signing"
-
-# Signer l'image
-if sbsign --key "$MOK_PRIV" --cert "$MOK_CERT_PEM" --output "${{VMLINUZ}}.signed" "$VMLINUZ" 2>&1; then
-    mv "${{VMLINUZ}}.signed" "$VMLINUZ"
-    vmlinuz_signed=1
-    echo "VMLINUZ_SIGNED:1"
-else
-    echo "VMLINUZ_SIGNED:0"
-fi
-"""
-        else:
-            script_content += """
-echo "VMLINUZ_SIGNED:0"
-"""
-
-        # IMPORTANT: Régénérer l'initrd après la signature des modules
-        # Sinon l'initrd contient les modules NON SIGNÉS et le boot échoue avec SecureBoot
-        script_content += f"""
-# Régénérer l'initrd pour inclure les modules signés
-KERNEL_VERSION="{kernel_version}"
-echo "PROGRESS_INITRD:regenerating"
-
-if update-initramfs -u -k "$KERNEL_VERSION" 2>&1; then
-    echo "INITRD_UPDATED:1"
-else
-    echo "INITRD_UPDATED:0"
-fi
-"""
-
-        # Créer le script temporaire
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as tf:
-            tf.write(script_content)
-            script_path = tf.name
-
-        logging.debug(f"Created unified signing script: {script_path}")
-        os.chmod(script_path, 0o755)
-
-        # Exécuter avec pkexec et suivre la progression
-        logging.info("Executing unified signing with pkexec (one password prompt only)...")
-
-        process = subprocess.Popen(
-            ["pkexec", "bash", script_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
-
-        # Lire la sortie en temps réel
-        stdout_lines = []
         modules_signed = 0
         modules_failed = 0
         vmlinuz_signed = False
         initrd_updated = False
 
-        while True:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
-            if line:
-                line = line.strip()
-                stdout_lines.append(line)
+        def on_line(line):
+            nonlocal modules_signed, modules_failed, vmlinuz_signed, initrd_updated
+            if line.startswith('PROGRESS_MODULE:'):
+                parts = line.split(':', 3)
+                if progress_callback:
+                    progress_callback(int(parts[1]), int(parts[2]), parts[3] if len(parts) > 3 else "")
+            elif line.startswith('PROGRESS_VMLINUZ:'):
+                if progress_callback:
+                    progress_callback(total_modules, total_modules, "vmlinuz")
+            elif line.startswith('PROGRESS_INITRD:'):
+                if progress_callback:
+                    progress_callback(total_modules, total_modules, "initrd")
+            elif line.startswith('MODULES_SIGNED:'):
+                modules_signed = int(line.split(':')[1])
+            elif line.startswith('MODULES_FAILED:'):
+                modules_failed = int(line.split(':')[1])
+            elif line.startswith('VMLINUZ_SIGNED:'):
+                vmlinuz_signed = line.split(':')[1] == '1'
+            elif line.startswith('INITRD_UPDATED:'):
+                initrd_updated = line.split(':')[1] == '1'
+            else:
+                logging.debug(f"helper: {line}")
 
-                # Parser la progression des modules
-                if line.startswith('PROGRESS_MODULE:'):
-                    parts = line.split(':')
-                    current = int(parts[1])
-                    total = int(parts[2])
-                    module_name = parts[3] if len(parts) > 3 else ""
-                    if progress_callback:
-                        progress_callback(current, total, module_name)
-                    logging.debug(f"Module progress: {current}/{total} - {module_name}")
-
-                # Parser la progression vmlinuz
-                elif line.startswith('PROGRESS_VMLINUZ:'):
-                    if progress_callback:
-                        progress_callback(total_modules, total_modules, "vmlinuz")
-                    logging.debug("Signing vmlinuz...")
-
-                # Parser la progression initrd
-                elif line.startswith('PROGRESS_INITRD:'):
-                    if progress_callback:
-                        progress_callback(total_modules, total_modules, "initrd")
-                    logging.debug("Regenerating initrd...")
-
-                # Parser les résultats
-                elif line.startswith('MODULES_SIGNED:'):
-                    modules_signed = int(line.split(':')[1])
-                elif line.startswith('MODULES_FAILED:'):
-                    modules_failed = int(line.split(':')[1])
-                elif line.startswith('VMLINUZ_SIGNED:'):
-                    vmlinuz_signed = (line.split(':')[1] == '1')
-                elif line.startswith('INITRD_UPDATED:'):
-                    initrd_updated = (line.split(':')[1] == '1')
-
-        process.wait()
-
-        # Nettoyer
-        try:
-            os.unlink(script_path)
-        except:
-            pass
+        logging.info("Executing unified signing via helper (one password prompt only)...")
+        helper_ok, _, helper_error = PkexecHelper.stream("sign-kernel", *args, on_line=on_line)
+        if not helper_ok:
+            logging.error(f"sign-kernel failed: {helper_error}")
+            if modules_signed == 0 and modules_failed == 0:
+                return {
+                    'success': False,
+                    'message': helper_error,
+                    'modules_signed': 0,
+                    'modules_failed': total_modules,
+                    'vmlinuz_signed': False,
+                    'initrd_updated': False
+                }
 
         success = (modules_failed == 0) and (not sign_vmlinuz_flag or vmlinuz_signed) and initrd_updated
 

@@ -16,6 +16,8 @@ import shutil
 import os
 import platform
 
+from utils.pkexec_helper import PkexecHelper
+
 
 class DriverManager:
     """Classe principale pour gérer les drivers GPU avec fonctionnalités avancées"""
@@ -503,40 +505,21 @@ class DriverManager:
 
     def install_from_repos(self, package_name, progress_callback=None):
         """
-        Installe un driver depuis les dépôts
+        Installe un driver depuis les dépôts Debian (via le helper privilégié)
         progress_callback: fonction appelée avec (message, percentage)
         Retourne: (success: bool, message: str)
         """
-        try:
-            if progress_callback:
-                progress_callback("Mise à jour de la liste des paquets...", 0.1)
+        if progress_callback:
+            progress_callback(f"Installation de {package_name}...", 0.3)
 
-            # Update apt cache
-            subprocess.run(
-                ["pkexec", "apt-get", "update"],
-                check=True,
-                capture_output=True
-            )
+        success, _, error = PkexecHelper.apt_install(package_name, update=True)
 
-            if progress_callback:
-                progress_callback(f"Installation de {package_name}...", 0.3)
+        if not success:
+            return (False, f"Erreur d'installation: {error}")
 
-            # Install package
-            result = subprocess.run(
-                ["pkexec", "apt-get", "install", "-y", package_name],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            if progress_callback:
-                progress_callback("Installation terminée", 1.0)
-
-            return (True, f"Driver {package_name} installé avec succès")
-
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else str(e)
-            return (False, f"Erreur d'installation: {error_msg}")
+        if progress_callback:
+            progress_callback("Installation terminée", 1.0)
+        return (True, f"Driver {package_name} installé avec succès")
 
     def download_official_driver(self, url, filename, progress_callback=None):
         """
@@ -571,82 +554,48 @@ class DriverManager:
                 download_path.unlink()
             return (False, None, f"Erreur de téléchargement: {str(e)}")
 
-    def install_nvidia_run_file(self, run_file_path, progress_callback=None):
-        """
-        Installe un fichier .run NVIDIA
-        ATTENTION: Nécessite arrêt du serveur graphique
-        Retourne: (success: bool, message: str)
-        """
+    def _installed_nvidia_packages(self):
+        """Paquets NVIDIA installés (nvidia-*, libnvidia-*, firmware-nvidia-*, ...)"""
         try:
-            if progress_callback:
-                progress_callback("Préparation de l'installation...", 0.1)
-
-            # Rendre exécutable
-            run_file_path.chmod(0o755)
-
-            if progress_callback:
-                progress_callback("Installation en cours...", 0.3)
-
-            # Installation (simplifié - en réalité nécessite arrêt de X)
-            # Pour une vraie implémentation, il faudrait:
-            # 1. Créer un script systemd
-            # 2. Redémarrer en mode texte
-            # 3. Exécuter le .run
-            # 4. Redémarrer
-
             result = subprocess.run(
-                ["pkexec", str(run_file_path), "--silent", "--no-questions"],
-                capture_output=True,
-                text=True,
-                timeout=600
+                ["dpkg-query", "-W", "-f", "${binary:Package}\t${db:Status-Status}\n"],
+                capture_output=True, text=True, check=True
             )
-
-            if result.returncode == 0:
-                if progress_callback:
-                    progress_callback("Installation terminée", 1.0)
-                return (True, "Driver NVIDIA installé avec succès. Un redémarrage est recommandé.")
-            else:
-                return (False, f"Erreur d'installation: {result.stderr}")
-
-        except subprocess.TimeoutExpired:
-            return (False, "Installation expirée (timeout)")
-        except Exception as e:
-            return (False, f"Erreur: {str(e)}")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return []
+        packages = []
+        for line in result.stdout.splitlines():
+            name, _, status = line.partition("\t")
+            base = name.split(":")[0]
+            if status == "installed" and re.match(r'^(lib)?nvidia-|^firmware-nvidia-|^xserver-xorg-video-nvidia', base):
+                packages.append(name)
+        return packages
 
     def remove_driver(self, vendor, progress_callback=None):
         """
-        Supprime le driver propriétaire
+        Supprime le driver propriétaire (NVIDIA uniquement : AMD/Intel sont libres)
         Retourne: (success: bool, message: str)
         """
-        try:
-            if vendor == 'NVIDIA':
-                if progress_callback:
-                    progress_callback("Suppression du driver NVIDIA...", 0.3)
-
-                # Essayer de désinstaller via apt
-                subprocess.run(
-                    ["pkexec", "apt-get", "remove", "--purge", "-y", "nvidia-*"],
-                    capture_output=True
-                )
-
-                # Essayer nvidia-uninstall si existe
-                nvidia_uninstall = Path("/usr/bin/nvidia-uninstall")
-                if nvidia_uninstall.exists():
-                    subprocess.run(
-                        ["pkexec", str(nvidia_uninstall), "--silent"],
-                        capture_output=True
-                    )
-
-                return (True, "Driver NVIDIA supprimé. Un redémarrage est recommandé.")
-
+        if vendor != 'NVIDIA':
             return (False, "Fabricant non supporté")
 
-        except Exception as e:
-            return (False, f"Erreur de suppression: {str(e)}")
+        if progress_callback:
+            progress_callback("Suppression du driver NVIDIA...", 0.3)
 
-    # ==========================================
-    # WEB SCRAPING DYNAMIQUE
-    # ==========================================
+        # Driver installé depuis les dépôts
+        packages = self._installed_nvidia_packages()
+        if packages:
+            success, _, error = PkexecHelper.remove_packages(*packages, autoremove=False)
+            if not success:
+                return (False, f"Erreur de suppression: {error}")
+
+        # Driver installé via le .run officiel
+        if Path("/usr/bin/nvidia-uninstall").exists():
+            success, _, error = PkexecHelper.nvidia("uninstall")
+            if not success:
+                return (False, f"Erreur nvidia-uninstall: {error}")
+
+        return (True, "Driver NVIDIA supprimé. Un redémarrage est recommandé.")
 
     def scrape_nvidia_latest_version(self, progress_callback=None):
         """
@@ -866,100 +815,27 @@ class DriverManager:
 
     def _install_nvidia_with_systemd(self, run_file_path, progress_callback=None):
         """
-        Crée un service systemd one-shot pour installer NVIDIA au prochain démarrage
+        Programme l'installation NVIDIA au prochain démarrage (service systemd one-shot,
+        géré par kernelcustom-nvidia-installer qui copie le .run dans un dossier root)
         """
-        try:
-            # Créer un script d'installation
-            install_script = self.drivers_dir / "install_nvidia.sh"
+        success, _, error = PkexecHelper.nvidia("schedule", run_file_path)
+        if not success:
+            return (False, f"Erreur de création du service: {error}")
 
-            script_content = f"""#!/bin/bash
-# Script d'installation automatique NVIDIA
-# Généré par KernelCustom Manager
+        if progress_callback:
+            progress_callback("Service créé", 1.0)
 
-# Arrêter le serveur graphique
-systemctl stop gdm3 2>/dev/null
-systemctl stop lightdm 2>/dev/null
-systemctl stop sddm 2>/dev/null
-
-# Installation
-{run_file_path} --silent --no-questions
-
-# Nettoyer le service
-systemctl disable kernelcustom-nvidia-install.service
-rm -f /etc/systemd/system/kernelcustom-nvidia-install.service
-rm -f {install_script}
-
-# Redémarrer
-reboot
-"""
-
-            with open(install_script, 'w') as f:
-                f.write(script_content)
-
-            install_script.chmod(0o755)
-
-            # Créer le service systemd
-            service_content = f"""[Unit]
-Description=KernelCustom Manager - NVIDIA Driver Installation
-After=multi-user.target
-Before=display-manager.service
-
-[Service]
-Type=oneshot
-ExecStart={install_script}
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-            service_file = Path("/tmp/kernelcustom-nvidia-install.service")
-            with open(service_file, 'w') as f:
-                f.write(service_content)
-
-            # Copier vers /etc/systemd/system/ avec pkexec
-            subprocess.run(
-                ["pkexec", "cp", str(service_file), "/etc/systemd/system/kernelcustom-nvidia-install.service"],
-                check=True
-            )
-
-            # Activer le service
-            subprocess.run(
-                ["pkexec", "systemctl", "enable", "kernelcustom-nvidia-install.service"],
-                check=True
-            )
-
-            if progress_callback:
-                progress_callback("Service créé", 1.0)
-
-            return (True, "Installation programmée au prochain redémarrage.\n\n⚠️ Le système va redémarrer et installer le driver NVIDIA automatiquement.\n\nVoulez-vous redémarrer maintenant ?")
-
-        except Exception as e:
-            return (False, f"Erreur de création du service: {str(e)}")
+        return (True, "Installation programmée au prochain redémarrage.\n\n⚠️ Le système va redémarrer et installer le driver NVIDIA automatiquement.\n\nVoulez-vous redémarrer maintenant ?")
 
     def _install_nvidia_direct(self, run_file_path, progress_callback=None):
         """Installation NVIDIA directe (déjà en mode TTY)"""
-        try:
-            if progress_callback:
-                progress_callback("Installation en cours...", 0.5)
+        if progress_callback:
+            progress_callback("Installation en cours...", 0.5)
 
-            result = subprocess.run(
-                ["pkexec", str(run_file_path), "--silent", "--no-questions"],
-                capture_output=True,
-                text=True,
-                timeout=600
-            )
+        success, _, error = PkexecHelper.nvidia("run", run_file_path, timeout=900)
+        if not success:
+            return (False, f"Erreur d'installation: {error}")
 
-            if result.returncode == 0:
-                if progress_callback:
-                    progress_callback("Installation terminée", 1.0)
-
-                return (True, "Driver NVIDIA installé avec succès. Un redémarrage est recommandé.")
-            else:
-                return (False, f"Erreur d'installation: {result.stderr}")
-
-        except subprocess.TimeoutExpired:
-            return (False, "Installation expirée (timeout)")
-        except Exception as e:
-            return (False, f"Erreur: {str(e)}")
+        if progress_callback:
+            progress_callback("Installation terminée", 1.0)
+        return (True, "Driver NVIDIA installé avec succès. Un redémarrage est recommandé.")

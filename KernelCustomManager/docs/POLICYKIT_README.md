@@ -1,171 +1,65 @@
-# PolicyKit Authentication System
+# PolicyKit et helpers privilégiés
 
-## 🔐 Overview
+KernelCustom Manager ne lance jamais `sudo` ni `pkexec bash -c`. Toutes les opérations root
+passent par **deux programmes Python** installés en `root:root` dans
+`/usr/libexec/kernelcustom-manager/` et autorisés par PolicyKit.
 
-KernelCustom Manager uses PolicyKit to handle privileged operations securely. With the new system, **you only need to enter your password once every 5 minutes** instead of multiple times for each operation.
+| Programme | Action polkit | Authentification | Rôle |
+|---|---|---|---|
+| `kernelcustom-helper` | `com.kernelcustom.manager.helper` | `auth_admin_keep` (mot de passe mémorisé quelques minutes) | Liste blanche d'actions validées |
+| `kernelcustom-nvidia-installer` | `com.kernelcustom.manager.nvidia` | `auth_admin` (**à chaque fois**) | Exécuter l'installeur NVIDIA `.run` (code tiers en root) |
 
-## How It Works
+## Actions de `kernelcustom-helper`
 
-### Traditional Method (without PolicyKit helper)
-- Install package → password ❌
-- Install headers → password ❌
-- Fix dependencies → password ❌
-- **Total: 3 password prompts**
+| Action | Validation |
+|---|---|
+| `apt-install [--update] PAQUET…` | noms de paquets Debian valides |
+| `install-debs FICHIER.deb…` | fichiers appartenant à l'utilisateur, paquets `linux-image*`, `linux-headers*`, `linux-libc-dev*` uniquement |
+| `remove-packages [--autoremove] PAQUET…` | noms valides, **refuse le kernel en cours d'exécution** |
+| `reboot` | — |
+| `mokutil-diagnose`, `mokutil-list-enrolled`, `mokutil-list-new` | — |
+| `mokutil-import [--wait] CLÉ`, `mokutil-delete [--wait] CLÉ`, `mokutil-reset [--wait]` | clé `.der/.cer/.crt` appartenant à l'utilisateur |
+| `sign-kernel VERSION --sign-file … --key … --cert-der … [--cert-pem … --vmlinuz …] [--no-initramfs]` | version valide, `/lib/modules/VERSION` existe, `sign-file` appartient à root (ainsi que ses dossiers parents), clés appartenant à l'utilisateur appelant, vmlinuz dans `/boot` |
 
-### New Method (with PolicyKit helper)
-- Install both packages + fix deps → password ✅
-- **Total: 1 password prompt**
+Règles du helper :
+- **Autonome** : il n'importe aucun module de l'application (qui peut être dans un dossier modifiable par l'utilisateur) et s'exécute avec `python3 -I`.
+- Aucune commande lancée via un shell, uniquement des listes d'arguments.
+- Toute erreur de validation renvoie le code 2 avec `ERROR: …` sur stderr.
 
-The authentication is cached for **5 minutes**, so subsequent operations won't require re-authentication.
+## Actions de `kernelcustom-nvidia-installer`
 
-## Installation
+| Action | Rôle |
+|---|---|
+| `run FICHIER.run` | Copie le `.run` dans `/var/lib/kernelcustom-manager/nvidia/` (root, 0700) puis l'exécute (`--silent --no-questions`) |
+| `schedule FICHIER.run` | Copie le `.run` puis active `kernelcustom-nvidia-install.service`, qui l'installe au prochain démarrage avant le gestionnaire d'affichage |
+| `boot-install` | Appelé par le service systemd : arrête le gestionnaire d'affichage, installe, nettoie, redémarre |
+| `cancel` | Annule une installation programmée |
+| `uninstall` | Lance `/usr/bin/nvidia-uninstall --silent` (si présent et appartenant à root) |
 
-The PolicyKit helper is **automatically installed** when you run `install.sh`. It installs two components:
-
-1. **Helper script**: `/usr/local/bin/kernelcustom-helper`
-   - Handles all privileged operations
-   - Executed via `pkexec` with PolicyKit
-
-2. **PolicyKit rules**: `/usr/share/polkit-1/actions/com.kernelcustom.manager.policy`
-   - Defines authentication policies
-   - Enables `auth_admin_keep` (5-minute cache)
-
-## Security
-
-The PolicyKit system is **more secure** than alternatives like `sudo NOPASSWD` because:
-
-- ✅ Still requires password authentication
-- ✅ Uses system-wide PolicyKit framework
-- ✅ Auditable through system logs
-- ✅ Can be revoked by system administrator
-- ✅ Works with any authentication method (password, fingerprint, etc.)
-
-## Supported Operations
-
-The helper script supports these operations:
-
-- `install-packages` - Install kernel .deb packages
-- `remove-packages` - Remove kernel packages with autoremove
-- `reboot` - Reboot the system
-- `copy-sources` - Copy kernel sources to /usr/src/
-- `create-link` - Create symbolic links in /usr/src/
-- `remove-sources` - Remove kernel sources from /usr/src/
-
-## Fallback Mode
-
-If the PolicyKit helper is **not installed**, the application automatically falls back to the traditional method using direct `pkexec` calls. This means:
-
-- ⚠️ You'll be asked for password multiple times
-- ✅ Application still works normally
-- ℹ️ No data loss or functionality issues
-
-## Manual Installation
-
-If you skipped the automatic installation, you can install manually:
+## Installation (depuis le dépôt)
 
 ```bash
-# Install helper and rules
-sudo cp kernelcustom-helper /usr/local/bin/
-sudo chmod +x /usr/local/bin/kernelcustom-helper
-sudo cp com.kernelcustom.manager.policy /usr/share/polkit-1/actions/
-```
-
-## Uninstallation
-
-To remove the PolicyKit helper:
-
-```bash
-# Run uninstall script
+./install.sh            # installe dépendances, helpers et policy
 ./uninstall-policykit.sh
-
-# Or manually
-sudo rm /usr/local/bin/kernelcustom-helper
-sudo rm /usr/share/polkit-1/actions/com.kernelcustom.manager.policy
 ```
 
-## Verification
+Équivalent manuel :
+```bash
+sudo install -d -m 0755 /usr/libexec/kernelcustom-manager
+sudo install -m 0755 helpers/kernelcustom-helper helpers/kernelcustom-nvidia-installer /usr/libexec/kernelcustom-manager/
+sudo install -m 0644 com.kernelcustom.manager.policy /usr/share/polkit-1/actions/
+```
 
-To check if the helper is installed:
+> ⚠️ Après toute modification de `helpers/*`, il faut **réinstaller** les helpers : l'application utilise toujours la copie installée dans `/usr/libexec`, jamais celle du dépôt.
+
+## Vérification
 
 ```bash
-# Check helper
-ls -l /usr/local/bin/kernelcustom-helper
-
-# Check PolicyKit rules
-ls -l /usr/share/polkit-1/actions/com.kernelcustom.manager.policy
+pkaction --verbose --action-id com.kernelcustom.manager.helper
+pkexec /usr/libexec/kernelcustom-manager/kernelcustom-helper mokutil-diagnose
 ```
 
-## Troubleshooting
+## Côté application
 
-### Password still asked multiple times
-
-**Possible causes:**
-1. PolicyKit rules not installed correctly
-2. PolicyKit daemon not running
-3. System configuration overrides
-
-**Solutions:**
-```bash
-# Reinstall PolicyKit components
-./uninstall-policykit.sh
-sudo cp kernelcustom-helper /usr/local/bin/
-sudo chmod +x /usr/local/bin/kernelcustom-helper
-sudo cp com.kernelcustom.manager.policy /usr/share/polkit-1/actions/
-
-# Restart PolicyKit daemon
-sudo systemctl restart polkit
-```
-
-### Operation fails with permission error
-
-**Check:**
-```bash
-# Verify helper has correct permissions
-ls -l /usr/local/bin/kernelcustom-helper
-# Should show: -rwxr-xr-x (executable)
-
-# Test helper manually
-pkexec /usr/local/bin/kernelcustom-helper
-# Should show usage message
-```
-
-## Technical Details
-
-### PolicyKit Policy Configuration
-
-The policy uses `auth_admin_keep` which means:
-- Requires admin authentication
-- Keeps authorization for 5 minutes
-- Applies to same user session
-
-```xml
-<defaults>
-  <allow_any>auth_admin</allow_any>
-  <allow_inactive>auth_admin</allow_inactive>
-  <allow_active>auth_admin_keep</allow_active>
-</defaults>
-```
-
-### Helper Script Security
-
-The helper script:
-- Only accepts specific predefined actions
-- Validates all arguments
-- Uses `set -e` to fail fast on errors
-- Runs with elevated privileges only when needed
-- Logs all operations through PolicyKit
-
-## Compatibility
-
-**Supported distributions:**
-- Debian 13 (Trixie)
-- Debian 14 (Forky)
-
-**Requirements:**
-- PolicyKit (polkit) installed
-- pkexec command available
-- D-Bus running
-
----
-
-**For more information**, see the main README.md
+`utils/pkexec_helper.py` (`PkexecHelper`) est le **seul** endroit qui appelle `pkexec`.
+`run()` attend la fin et renvoie `(succès, stdout, erreur)`. `stream()` lit la sortie ligne par ligne, par exemple pour la progression de `sign-kernel`. Les codes 126 et 127 de pkexec (authentification annulée ou refusée) sont traduits en messages lisibles.

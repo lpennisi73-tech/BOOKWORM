@@ -55,7 +55,6 @@ echo ""
 # Rendre les scripts exécutables
 chmod +x kernelcustom_manager.py 2>/dev/null || true
 chmod +x manage_kernel_sources.sh 2>/dev/null || true
-chmod +x kernelcustom-helper 2>/dev/null || true
 
 # Rendre les scripts SecureBoot exécutables
 echo "🔐 Configuration des scripts SecureBoot..."
@@ -64,20 +63,22 @@ if [ -d "scripts/secureboot" ]; then
     echo "   ✓ Scripts SecureBoot configurés"
 fi
 
-# Installer PolicyKit et le helper
-echo "🔐 Installation du helper PolicyKit..."
-if sudo cp kernelcustom-helper /usr/local/bin/kernelcustom-helper 2>/dev/null; then
-    sudo chmod +x /usr/local/bin/kernelcustom-helper
-    echo "   ✓ Helper installé dans /usr/local/bin/"
+# Installer les helpers privilégiés (root:root, non modifiables) et la policy PolicyKit
+echo "🔐 Installation des helpers privilégiés..."
+HELPER_DIR=/usr/libexec/kernelcustom-manager
+sudo install -d -o root -g root -m 0755 "$HELPER_DIR"
+sudo install -o root -g root -m 0755 helpers/kernelcustom-helper "$HELPER_DIR/kernelcustom-helper"
+sudo install -o root -g root -m 0755 helpers/kernelcustom-nvidia-installer "$HELPER_DIR/kernelcustom-nvidia-installer"
+echo "   ✓ Helpers installés dans $HELPER_DIR"
+
+# Ancien emplacement (versions ≤ 2.3)
+if [ -e /usr/local/bin/kernelcustom-helper ]; then
+    sudo rm -f /usr/local/bin/kernelcustom-helper
+    echo "   ✓ Ancien helper /usr/local/bin/kernelcustom-helper supprimé"
 fi
 
-if sudo cp com.kernelcustom.manager.policy /usr/share/polkit-1/actions/ 2>/dev/null; then
-    echo "   ✓ Règles PolicyKit installées"
-    echo "   ✓ Le mot de passe ne sera demandé qu'une fois toutes les 5 minutes !"
-else
-    echo "   ⚠️  Impossible d'installer les règles PolicyKit (sudo requis)"
-    echo "      L'application fonctionnera mais demandera le mot de passe plus souvent"
-fi
+sudo install -o root -g root -m 0644 com.kernelcustom.manager.policy /usr/share/polkit-1/actions/
+echo "   ✓ Règles PolicyKit installées (mot de passe mémorisé quelques minutes)"
 
 # Créer le lanceur d'application
 echo "🚀 Installation du lanceur d'application..."

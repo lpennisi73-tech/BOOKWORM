@@ -7,6 +7,8 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib, Pango
 import threading
+
+from utils.pkexec_helper import PkexecHelper
 import subprocess
 from pathlib import Path
 from datetime import datetime
@@ -266,10 +268,7 @@ def reboot_now(main_window, i18n):
     dialog.destroy()
 
     if response == Gtk.ResponseType.YES:
-        try:
-            subprocess.Popen(["pkexec", "systemctl", "reboot"])
-        except Exception as e:
-            show_error_dialog(main_window, f"Failed to reboot: {str(e)}", i18n)
+        reboot_via_helper(main_window, i18n)
 
 
 def start_mok_enrollment_wizard(sb_manager, main_window, i18n):
@@ -398,10 +397,7 @@ def show_reboot_instructions_dialog(main_window, i18n):
 
     # Si l'utilisateur choisit de rebooter maintenant
     if response == Gtk.ResponseType.OK:
-        try:
-            subprocess.Popen(["pkexec", "systemctl", "reboot"])
-        except Exception as e:
-            show_error_dialog(main_window, f"Failed to reboot: {str(e)}", i18n)
+        reboot_via_helper(main_window, i18n)
 
 
 def start_module_signing_wizard(sb_manager, main_window, i18n):
@@ -823,7 +819,6 @@ def install_dependencies(main_window, sb_manager, deps_label, i18n):
         show_info_dialog(main_window, i18n._("secureboot.all_dependencies_installed"), i18n)
         return
 
-    cmd = f"apt install -y {' '.join(packages)}"
 
     # Demander confirmation
     dialog = Gtk.MessageDialog(
@@ -839,7 +834,7 @@ def install_dependencies(main_window, sb_manager, deps_label, i18n):
     dialog.destroy()
 
     if response == Gtk.ResponseType.YES:
-        run_pkexec_command(main_window, cmd, i18n._("secureboot.installing_dependencies"), i18n,
+        run_helper_action(main_window, lambda: PkexecHelper.apt_install(*packages), i18n,
                           lambda success: update_dependencies_display(sb_manager, deps_label, i18n))
 
 
@@ -1004,9 +999,8 @@ def import_mok_key(main_window, sb_manager, entry, i18n):
     dialog.destroy()
 
     if response == Gtk.ResponseType.YES:
-        # Exécuter l'import dans un terminal
-        cmd = f"mokutil --import '{key_file}'"
-        run_terminal_command(main_window, cmd, i18n._("secureboot.importing_key"), i18n)
+        # Exécuter l'import dans un terminal (mokutil demande un mot de passe temporaire)
+        run_terminal_command(main_window, PkexecHelper.terminal_command("mokutil-import", key_file), i18n)
 
 
 def reset_mok_keys(main_window, sb_manager, i18n):
@@ -1024,8 +1018,7 @@ def reset_mok_keys(main_window, sb_manager, i18n):
     dialog.destroy()
 
     if response == Gtk.ResponseType.YES:
-        cmd = "mokutil --reset"
-        run_terminal_command(main_window, cmd, i18n._("secureboot.resetting_keys"), i18n)
+        run_terminal_command(main_window, PkexecHelper.terminal_command("mokutil-reset"), i18n)
 
 
 # ==================== Onglet 3: Signature de modules ====================
@@ -1338,56 +1331,57 @@ def show_info_dialog(parent, message, i18n):
     dialog.destroy()
 
 
-def run_pkexec_command(parent, command, title, i18n, callback=None):
-    """Exécute une commande avec pkexec"""
+def reboot_via_helper(parent, i18n):
+    """Redémarre via le helper privilégié"""
+    success, _, error = PkexecHelper.reboot()
+    if not success:
+        show_error_dialog(parent, f"Failed to reboot: {error}", i18n)
+
+
+def run_helper_action(parent, action, i18n, callback=None):
+    """
+    Exécute une action du helper dans un thread puis affiche le résultat.
+    action: fonction sans argument retournant (success, stdout, error)
+    """
     def do_run():
         try:
-            result = subprocess.run(
-                ["pkexec", "bash", "-c", command],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-
-            def update_ui():
-                if result.returncode == 0:
-                    if callback:
-                        callback(True)
-                    show_info_dialog(parent, i18n._("message.success.operation"), i18n)
-                else:
-                    if callback:
-                        callback(False)
-                    show_error_dialog(parent, result.stderr or i18n._("message.error.operation"), i18n)
-
-            GLib.idle_add(update_ui)
+            success, _, error = action()
         except Exception as e:
-            def show_error():
-                show_error_dialog(parent, str(e), i18n)
-            GLib.idle_add(show_error)
+            success, error = False, str(e)
 
-    thread = threading.Thread(target=do_run)
-    thread.daemon = True
-    thread.start()
+        def update_ui():
+            if callback:
+                callback(success)
+            if success:
+                show_info_dialog(parent, i18n._("message.success.operation"), i18n)
+            else:
+                show_error_dialog(parent, error or i18n._("message.error.operation"), i18n)
+        GLib.idle_add(update_ui)
+
+    threading.Thread(target=do_run, daemon=True).start()
 
 
-def run_terminal_command(parent, command, title, i18n):
-    """Exécute une commande dans un terminal"""
-    try:
-        # Essayer différents émulateurs de terminal
-        terminals = [
-            ["x-terminal-emulator", "-e"],
-            ["gnome-terminal", "--"],
-            ["konsole", "-e"],
-            ["xterm", "-e"]
-        ]
+def run_terminal_command(parent, command, i18n):
+    """
+    Lance une commande (liste d'arguments) dans un émulateur de terminal.
+    Pas de `bash -c` : les arguments sont transmis tels quels.
+    """
+    terminals = [
+        ["x-terminal-emulator", "-e"],
+        ["ptyxis", "--"],
+        ["gnome-terminal", "--"],
+        ["konsole", "-e"],
+        ["xterm", "-e"]
+    ]
 
-        for terminal_cmd in terminals:
-            try:
-                subprocess.Popen(terminal_cmd + ["bash", "-c", f"pkexec {command}; read -p 'Press Enter to close...'"])
-                return
-            except FileNotFoundError:
-                continue
+    for terminal_cmd in terminals:
+        try:
+            subprocess.Popen(terminal_cmd + command)
+            return
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            show_error_dialog(parent, str(e), i18n)
+            return
 
-        show_error_dialog(parent, i18n._("secureboot.no_terminal"), i18n)
-    except Exception as e:
-        show_error_dialog(parent, str(e), i18n)
+    show_error_dialog(parent, i18n._("secureboot.no_terminal"), i18n)

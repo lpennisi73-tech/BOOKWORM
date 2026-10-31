@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from datetime import datetime
 from utils.i18n import get_i18n
+from utils.pkexec_helper import PkexecHelper
 from core.driver_manager import DriverManager
 
 
@@ -562,7 +563,7 @@ def install_from_repos(main_window, driver_manager, view, store, gpu_label, curr
         i18n._("drivers.backup_recommended")
     )
 
-    if response == Gtk.ResponseType.YES:
+    if response:
         # Créer backup d'abord
         success, backup_id, msg = driver_manager.create_driver_backup(vendor)
         if not success:
@@ -578,7 +579,7 @@ def install_from_repos(main_window, driver_manager, view, store, gpu_label, curr
         i18n._("drivers.reboot_required")
     )
 
-    if response != Gtk.ResponseType.YES:
+    if not response:
         return
 
     # Dialogue de progression
@@ -764,7 +765,7 @@ def download_and_install_official(main_window, driver_manager, info_label, gpu_l
         warning_msg
     )
 
-    if response != Gtk.ResponseType.YES:
+    if not response:
         return
 
     # Créer backup automatique
@@ -848,14 +849,14 @@ def download_and_install_official(main_window, driver_manager, info_label, gpu_l
         if success:
             # Si NVIDIA + systemd, demander redémarrage
             if vendor == 'NVIDIA' and "redémarrage" in install_msg.lower():
-                response = GLib.idle_add(lambda: main_window.dialogs.show_question(
-                    i18n._("drivers.success_title"),
-                    install_msg
-                ))
-
-                if response == Gtk.ResponseType.YES:
-                    import subprocess
-                    subprocess.run(["pkexec", "reboot"])
+                # La question doit être posée dans le thread GTK, le reboot suit la réponse
+                def ask_reboot():
+                    if main_window.dialogs.show_question(i18n._("drivers.success_title"), install_msg):
+                        success_reboot, _, error = PkexecHelper.reboot()
+                        if not success_reboot:
+                            main_window.dialogs.show_error(i18n._("message.error.title"), error)
+                    return False
+                GLib.idle_add(ask_reboot)
             else:
                 GLib.idle_add(lambda: main_window.dialogs.show_info(
                     i18n._("drivers.success_title"),
@@ -908,7 +909,7 @@ def remove_current_driver(main_window, driver_manager, gpu_label, current_driver
         i18n._("drivers.backup_before_removal")
     )
 
-    if response == Gtk.ResponseType.YES:
+    if response:
         driver_manager.create_driver_backup(vendor)
 
     # Confirmation
@@ -918,7 +919,7 @@ def remove_current_driver(main_window, driver_manager, gpu_label, current_driver
         i18n._("drivers.opensource_fallback")
     )
 
-    if response != Gtk.ResponseType.YES:
+    if not response:
         return
 
     # Suppression
@@ -1001,7 +1002,7 @@ def restore_from_backup(main_window, driver_manager, view, store, i18n):
         i18n._("drivers.confirm_rollback", backup_id=backup_id)
     )
 
-    if response != Gtk.ResponseType.YES:
+    if not response:
         return
 
     # Dialogue de progression

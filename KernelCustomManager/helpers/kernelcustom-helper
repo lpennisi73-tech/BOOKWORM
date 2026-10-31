@@ -1,0 +1,397 @@
+#!/usr/bin/python3 -I
+"""
+KernelCustom Manager - helper privilégié (exécuté en root via pkexec)
+
+Règles de sécurité :
+- Ce fichier est AUTONOME : il n'importe jamais le code de l'application
+  (qui peut se trouver dans un dossier modifiable par l'utilisateur).
+- Seules les actions listées ci-dessous sont acceptées, et chaque argument
+  est validé (noms de paquets, versions de kernel, chemins, propriétaires).
+- Aucune commande n'est exécutée via un shell.
+
+Installation : /usr/libexec/kernelcustom-manager/kernelcustom-helper (root:root 0755)
+Policy polkit : com.kernelcustom.manager.helper (auth_admin_keep)
+"""
+
+import argparse
+import gzip
+import lzma
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+try:
+    from compression import zstd  # Python 3.14+
+except ImportError:  # pragma: no cover
+    zstd = None
+
+PKG_RE = re.compile(r'^[a-z0-9][a-z0-9+.-]+(:[a-z0-9]+)?$')
+KVER_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+~-]*$')
+KERNEL_DEB_RE = re.compile(r'^linux-(image|headers|libc-dev)(-.+)?$')
+MODULE_EXTS = ('.ko', '.ko.xz', '.ko.gz', '.ko.zst')
+
+APT_ENV = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive', 'LC_ALL': 'C.UTF-8'}
+
+
+class HelperError(Exception):
+    """Erreur de validation ou d'exécution (code de sortie 2)"""
+
+
+# ==================== Utilitaires ====================
+
+def out(line):
+    print(line, flush=True)
+
+
+def caller_uid():
+    """UID de l'utilisateur ayant appelé pkexec (root si lancé directement)"""
+    try:
+        return int(os.environ.get('PKEXEC_UID', '0'))
+    except ValueError:
+        return 0
+
+
+def run(cmd, **kwargs):
+    """Exécute une commande (liste d'arguments, jamais de shell) et lève une erreur si elle échoue"""
+    result = subprocess.run(cmd, **kwargs)
+    if result.returncode != 0:
+        raise HelperError(f"échec de la commande ({result.returncode}): {' '.join(map(str, cmd))}")
+    return result
+
+
+def check_package_names(names):
+    if not names:
+        raise HelperError("aucun paquet fourni")
+    for name in names:
+        if not PKG_RE.match(name):
+            raise HelperError(f"nom de paquet invalide: {name!r}")
+
+
+def check_kernel_version(version):
+    if not KVER_RE.match(version):
+        raise HelperError(f"version de kernel invalide: {version!r}")
+    return version
+
+
+def user_file(path, suffixes=None):
+    """
+    Fichier régulier appartenant à l'utilisateur appelant.
+    Empêche d'utiliser le helper pour lire/traiter des fichiers d'un autre compte
+    (ex: une clé privée système illisible par l'utilisateur).
+    """
+    real = Path(os.path.realpath(path))
+    try:
+        st = real.stat()
+    except OSError:
+        raise HelperError(f"fichier introuvable: {path}")
+    if not stat.S_ISREG(st.st_mode):
+        raise HelperError(f"pas un fichier régulier: {path}")
+    if st.st_uid != caller_uid():
+        raise HelperError(f"le fichier n'appartient pas à l'utilisateur appelant: {path}")
+    if suffixes and not real.name.endswith(tuple(suffixes)):
+        raise HelperError(f"extension inattendue: {path}")
+    return real
+
+
+def trusted_executable(path):
+    """
+    Exécutable de confiance : appartient à root et ni lui ni ses dossiers parents
+    ne sont modifiables par un autre utilisateur (sinon exécution de code arbitraire en root).
+    """
+    real = Path(os.path.realpath(path))
+    try:
+        st = real.stat()
+    except OSError:
+        raise HelperError(f"exécutable introuvable: {path}")
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o022:
+        raise HelperError(f"exécutable non fiable (doit appartenir à root, non modifiable): {real}")
+    for parent in real.parents:
+        pst = parent.stat()
+        if pst.st_uid != 0 or pst.st_mode & 0o022:
+            raise HelperError(f"dossier non fiable (doit appartenir à root, non modifiable): {parent}")
+    return real
+
+
+def path_under(path, roots, what):
+    real = os.path.realpath(path)
+    if not real.startswith(tuple(roots)):
+        raise HelperError(f"{what} hors des emplacements autorisés: {path}")
+    return Path(real)
+
+
+def running_kernel_packages():
+    release = os.uname().release
+    return {f'linux-image-{release}', f'linux-image-{release}-unsigned', f'linux-headers-{release}'}
+
+
+# ==================== Paquets ====================
+
+def cmd_apt_install(args):
+    """Installe des paquets depuis les dépôts"""
+    check_package_names(args.packages)
+    if args.update:
+        run(['apt-get', 'update'], env=APT_ENV)
+    run(['apt-get', 'install', '-y', '--'] + args.packages, env=APT_ENV)
+
+
+def cmd_install_debs(args):
+    """Installe des paquets kernel .deb locaux (linux-image/headers/libc-dev uniquement)"""
+    debs = [user_file(p, ['.deb']) for p in args.debs]
+    for deb in debs:
+        name = subprocess.run(['dpkg-deb', '-f', str(deb), 'Package'],
+                              capture_output=True, text=True).stdout.strip()
+        if not KERNEL_DEB_RE.match(name):
+            raise HelperError(f"seuls les paquets kernel sont acceptés ({deb.name} → {name or '?'})")
+    # apt-get résout aussi les dépendances (remplace dpkg -i + apt-get -f install)
+    run(['apt-get', 'install', '-y', '--'] + [str(d) for d in debs], env=APT_ENV)
+
+
+def cmd_remove_packages(args):
+    """Purge des paquets (refuse le kernel en cours d'exécution)"""
+    check_package_names(args.packages)
+    protected = running_kernel_packages() & set(args.packages)
+    if protected:
+        raise HelperError(f"refus de supprimer le kernel en cours d'exécution: {', '.join(sorted(protected))}")
+    run(['apt-get', 'purge', '-y', '--'] + args.packages, env=APT_ENV)
+    if args.autoremove:
+        run(['apt-get', 'autoremove', '-y'], env=APT_ENV)
+
+
+def cmd_reboot(args):
+    run(['systemctl', 'reboot'])
+
+
+# ==================== MOK / SecureBoot ====================
+
+def wait_for_enter(args):
+    if getattr(args, 'wait', False):
+        try:
+            input("\nAppuyez sur Entrée pour fermer...")
+        except EOFError:
+            pass
+
+
+def cmd_mokutil_list_enrolled(args):
+    sys.exit(subprocess.run(['mokutil', '--list-enrolled']).returncode)
+
+
+def cmd_mokutil_list_new(args):
+    sys.exit(subprocess.run(['mokutil', '--list-new']).returncode)
+
+
+def cmd_mokutil_diagnose(args):
+    # mokutil peut retourner un code non nul avec une sortie valide (Debian 13+) :
+    # on ignore le code de retour et on renvoie toujours la sortie
+    out("ENROLLED:")
+    subprocess.run(['mokutil', '--list-enrolled'], stderr=subprocess.STDOUT)
+    out("PENDING:")
+    subprocess.run(['mokutil', '--list-new'], stderr=subprocess.STDOUT)
+
+
+def _mokutil_interactive(args, option, key=None):
+    """mokutil demande un mot de passe temporaire sur stdin (terminal ou pipe)"""
+    cmd = ['mokutil', option] + ([str(key)] if key else [])
+    code = subprocess.run(cmd).returncode
+    wait_for_enter(args)
+    sys.exit(code)
+
+
+def cmd_mokutil_import(args):
+    _mokutil_interactive(args, '--import', user_file(args.key, ['.der', '.cer', '.crt']))
+
+
+def cmd_mokutil_delete(args):
+    _mokutil_interactive(args, '--delete', user_file(args.key, ['.der', '.cer', '.crt']))
+
+
+def cmd_mokutil_reset(args):
+    _mokutil_interactive(args, '--reset')
+
+
+# ==================== Signature d'un kernel ====================
+
+def _decompress(kind, data):
+    if kind == 'xz':
+        return lzma.decompress(data)
+    if kind == 'gz':
+        return gzip.decompress(data)
+    if kind == 'zst':
+        if zstd is None:
+            raise HelperError("module zstd non disponible (Python 3.14+ requis)")
+        return zstd.decompress(data)
+    raise HelperError(f"compression inconnue: {kind}")
+
+
+def _compress(kind, data):
+    # Mêmes paramètres que kbuild (scripts/Makefile.modinst)
+    if kind == 'xz':
+        return lzma.compress(data, check=lzma.CHECK_CRC32,
+                             filters=[{'id': lzma.FILTER_LZMA2, 'dict_size': 1 << 20}])
+    if kind == 'gz':
+        return gzip.compress(data, compresslevel=9, mtime=0)
+    if kind == 'zst':
+        return zstd.compress(data)
+    raise HelperError(f"compression inconnue: {kind}")
+
+
+def _atomic_write(target, data, mode):
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix='.kcm-')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _sign_module(sign_file, key, cert, module):
+    """Signe un module (décompresse/recompresse si nécessaire). Retourne True si OK."""
+    if module.name.endswith('.ko'):
+        return subprocess.run([str(sign_file), 'sha256', str(key), str(cert), str(module)],
+                              capture_output=True).returncode == 0
+
+    kind = module.name.rsplit('.', 1)[1]
+    mode = stat.S_IMODE(module.stat().st_mode)
+    fd, tmp = tempfile.mkstemp(dir=module.parent, prefix='.kcm-', suffix='.ko')
+    tmp = Path(tmp)
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(_decompress(kind, module.read_bytes()))
+        if subprocess.run([str(sign_file), 'sha256', str(key), str(cert), str(tmp)],
+                          capture_output=True).returncode != 0:
+            return False
+        _atomic_write(module, _compress(kind, tmp.read_bytes()), mode)
+        return True
+    except (OSError, lzma.LZMAError, EOFError, HelperError):
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def cmd_sign_kernel(args):
+    """
+    Signe les modules (et optionnellement vmlinuz) d'un kernel puis régénère l'initrd.
+    Protocole de sortie (lu par l'application) :
+      PROGRESS_MODULE:<n>:<total>:<nom>  MODULES_SIGNED:<n>  MODULES_FAILED:<n>
+      PROGRESS_VMLINUZ:signing  VMLINUZ_SIGNED:<0|1>
+      PROGRESS_INITRD:regenerating  INITRD_UPDATED:<0|1>
+    """
+    version = check_kernel_version(args.version)
+    kernel_dir = Path('/lib/modules') / version
+    if not kernel_dir.is_dir():
+        raise HelperError(f"dossier des modules introuvable: {kernel_dir}")
+
+    sign_file = trusted_executable(args.sign_file)
+    key = user_file(args.key, ['.priv', '.key', '.pem'])
+    cert_der = user_file(args.cert_der, ['.der', '.cer', '.crt'])
+
+    modules = sorted(p for p in kernel_dir.rglob('*')
+                     if p.is_file() and not p.is_symlink() and p.name.endswith(MODULE_EXTS))
+    total = len(modules)
+    signed = failed = 0
+    for index, module in enumerate(modules, 1):
+        if _sign_module(sign_file, key, cert_der, module):
+            signed += 1
+        else:
+            failed += 1
+        out(f"PROGRESS_MODULE:{index}:{total}:{module.name}")
+    out(f"MODULES_SIGNED:{signed}")
+    out(f"MODULES_FAILED:{failed}")
+
+    vmlinuz_signed = 0
+    if args.vmlinuz:
+        vmlinuz = path_under(args.vmlinuz, ['/boot/'], "vmlinuz")
+        if not vmlinuz.name.startswith('vmlinuz-') or not vmlinuz.is_file():
+            raise HelperError(f"image vmlinuz invalide: {args.vmlinuz}")
+        if not args.cert_pem:
+            raise HelperError("--cert-pem requis pour signer vmlinuz")
+        cert_pem = user_file(args.cert_pem, ['.pem', '.crt'])
+        out("PROGRESS_VMLINUZ:signing")
+        tmp = vmlinuz.with_name(vmlinuz.name + '.kcm-signed')
+        result = subprocess.run(['/usr/bin/sbsign', '--key', str(key), '--cert', str(cert_pem),
+                                 '--output', str(tmp), str(vmlinuz)],
+                                stdout=sys.stderr, stderr=sys.stderr)
+        if result.returncode == 0:
+            os.chmod(tmp, stat.S_IMODE(vmlinuz.stat().st_mode))
+            os.replace(tmp, vmlinuz)
+            vmlinuz_signed = 1
+        else:
+            tmp.unlink(missing_ok=True)
+    out(f"VMLINUZ_SIGNED:{vmlinuz_signed}")
+
+    initrd_ok = 1
+    if not args.no_initramfs:
+        # L'initrd doit contenir les modules signés, sinon le boot échoue avec SecureBoot
+        out("PROGRESS_INITRD:regenerating")
+        initrd_ok = int(subprocess.run(['update-initramfs', '-u', '-k', version],
+                                       stdout=sys.stderr, stderr=sys.stderr).returncode == 0)
+    out(f"INITRD_UPDATED:{initrd_ok}")
+
+
+# ==================== Point d'entrée ====================
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog='kernelcustom-helper', description=__doc__.splitlines()[1])
+    sub = parser.add_subparsers(dest='action', required=True)
+
+    p = sub.add_parser('apt-install', help='installer des paquets depuis les dépôts')
+    p.add_argument('--update', action='store_true', help='apt-get update avant installation')
+    p.add_argument('packages', nargs='+')
+    p.set_defaults(func=cmd_apt_install)
+
+    p = sub.add_parser('install-debs', help='installer des paquets kernel .deb locaux')
+    p.add_argument('debs', nargs='+')
+    p.set_defaults(func=cmd_install_debs)
+
+    p = sub.add_parser('remove-packages', help='purger des paquets')
+    p.add_argument('--autoremove', action='store_true')
+    p.add_argument('packages', nargs='+')
+    p.set_defaults(func=cmd_remove_packages)
+
+    sub.add_parser('reboot').set_defaults(func=cmd_reboot)
+
+    sub.add_parser('mokutil-list-enrolled').set_defaults(func=cmd_mokutil_list_enrolled)
+    sub.add_parser('mokutil-list-new').set_defaults(func=cmd_mokutil_list_new)
+    sub.add_parser('mokutil-diagnose').set_defaults(func=cmd_mokutil_diagnose)
+    for name, func, needs_key in (('mokutil-import', cmd_mokutil_import, True),
+                                  ('mokutil-delete', cmd_mokutil_delete, True),
+                                  ('mokutil-reset', cmd_mokutil_reset, False)):
+        p = sub.add_parser(name)
+        p.add_argument('--wait', action='store_true', help='attendre Entrée à la fin (terminal)')
+        if needs_key:
+            p.add_argument('key')
+        p.set_defaults(func=func)
+
+    p = sub.add_parser('sign-kernel', help='signer modules (+ vmlinuz) et régénérer l\'initrd')
+    p.add_argument('version')
+    p.add_argument('--sign-file', required=True)
+    p.add_argument('--key', required=True)
+    p.add_argument('--cert-der', required=True)
+    p.add_argument('--cert-pem')
+    p.add_argument('--vmlinuz')
+    p.add_argument('--no-initramfs', action='store_true')
+    p.set_defaults(func=cmd_sign_kernel)
+
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    if os.geteuid() != 0:
+        print("ERROR: ce helper doit être exécuté en root (via pkexec)", file=sys.stderr)
+        sys.exit(2)
+    try:
+        args.func(args)
+    except HelperError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == '__main__':
+    main()
