@@ -31,6 +31,13 @@ def setup_logging():
         ]
     )
 
+    # Une exception dans un callback GTK n'arrête pas l'application et n'apparaît
+    # que sur stderr : on l'enregistre aussi dans le journal
+    def log_uncaught(exc_type, exc_value, exc_tb):
+        logging.critical("Exception non interceptée", exc_info=(exc_type, exc_value, exc_tb))
+
+    sys.excepthook = log_uncaught
+
 
 class KernelCustomApplication(Adw.Application):
     """Application unique (une seule instance, id D-Bus com.kernelcustom.manager)"""

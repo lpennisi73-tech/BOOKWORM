@@ -82,7 +82,7 @@ class I18n:
         """Get current language"""
         return self.current_lang
 
-    def _(self, key, **kwargs):
+    def _(self, key, /, **kwargs):
         """Translate a key"""
         # Get translation for current language
         translation = self.translations.get(self.current_lang, {})
@@ -121,6 +121,6 @@ def get_i18n():
         _i18n_instance = I18n()
     return _i18n_instance
 
-def _(key, **kwargs):
+def _(key, /, **kwargs):
     """Shortcut for translation"""
     return get_i18n()._(key, **kwargs)
