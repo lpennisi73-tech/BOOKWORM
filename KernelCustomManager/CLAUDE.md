@@ -26,7 +26,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - [x] **3. Helper root en Python** : `kernelcustom-helper` réécrit en Python avec une **liste blanche d'actions** et la validation des chemins (uniquement dans `/usr/src`, le dossier de travail de l'utilisateur, `/boot`…). Supprimer `pkexec bash -c` (`gui/secureboot_tab.py`) et `shell=True` (`core/secureboot_manager.py`). Tous les `pkexec apt/dpkg/cp/systemctl` dispersés passent par le helper
 - [x] **4. Portage du bash restant** : `manage_kernel_sources.sh` → `core/sources_manager.py` + actions `sources-*` du helper. `scripts/secureboot/*.sh` supprimés (doublons de l'app ; seul le contrôle shim/mmx64.efi était nouveau → intégré au diagnostic via `mokutil-diagnose`). Script de compilation `bash -c` → `core/build_runner.py` lancé via `utils/terminal.py`
 - [x] **5. Chemins centralisés** : `utils/paths.py` (code, traductions, icônes, runner, helpers, données XDG, configuration) + migration automatique de `~/KernelCustomManager/build`
-- [ ] **6. Outil de nettoyage du dossier de travail** : `core/cleanup_manager.py` + une interface (onglet ou dialogue). Il liste avec leur taille les sources extraites, les arbres compilés, les archives `.tar.xz` téléchargées, les `.deb` générés, les logs et les fichiers pilotes. On peut les supprimer en sélection ou par catégorie, avec confirmation. **Il ne touche jamais** aux sources liées dans `/usr/src` ni au kernel en cours d'exécution (`uname -r`). Les clés MOK sont exclues par défaut
+- [x] **6. Outil de nettoyage (logique)** : `core/cleanup_manager.py` (`scan()` / `clean()`, sans GTK) + traductions `cleanup.*`. **L'interface sera écrite en GTK4 à l'étape 7** (onglet ou dialogue « 🧹 Nettoyage »)
 - [ ] **7. Portage GTK4 + libadwaita** : onglet par onglet (voir la section dédiée). L'interface de l'outil de nettoyage est écrite directement en GTK4 si l'étape 6 arrive après le début du portage
 - [ ] **8. Paquet .deb (TOUT À LA FIN)** : création de `debian/`, construction, `lintian`, test d'installation et de désinstallation. Supprimer `install.sh`, `uninstall-policykit.sh` et le dossier en double `KernelCustomManager/` (il ne contient que des `__init__.py` vides)
 - [ ] **9. Release v3.0** : mise à jour de la version, du changelog Debian et de la doc
@@ -60,6 +60,15 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - Suivi de fin : le runner écrit `<log>.status.json` (`running` + pid, puis `done` + returncode + paquets) et l'app le surveille (`_wait_for_status`). Le code de retour du terminal ne sert pas, car gnome-terminal rend la main immédiatement.
 - Le suffixe `LOCALVERSION` est validé (`^[A-Za-z0-9._+~-]+$`) et passé comme argument de `make`, jamais interprété par un shell.
 - `tar` (extraction des sources) et `make` restent des outils système appelés avec des listes d'arguments.
+
+## Nettoyage (étape 6)
+
+- `CleanupManager.scan(include_keys=False)` renvoie des `CleanupItem` (category, path, size, action `delete`/`make_clean`, protected, reason, selected). `clean(items, progress_callback)` renvoie `{freed, done, errors}`. Le scan parcourt de gros arbres : **toujours l'appeler dans un thread**.
+- Catégories, dans l'ordre et avec leur sélection par défaut : `build_objects`✅ (`make clean` : garde `.config` et de quoi compiler des modules externes, donc OK même pour un arbre utilisé par DKMS), `archives`✅, `logs`✅, `driver_downloads`✅, `sources`, `headers`, `packages`, `driver_backups`, `config_backups`, `secureboot_keys` (uniquement si `include_keys`).
+- Protégés (`protected=True`, jamais supprimés) : les cibles des liens de `/usr/src` et `/lib/modules/*/build|source` (`linked_usr_src`), les sources et headers du kernel `uname -r` (`running_kernel`). Raisons informatives : `active_build`, `installed_kernel`, `secureboot_keys`.
+- `clean()` **revalide tout** : chemin dans le dossier de travail, protection recalculée, clés uniquement via leur catégorie. Il supprime aussi le lien `build/linux` s'il pointait vers l'arbre supprimé.
+- Jamais listés : profils, historiques, journal en cours.
+- Inventaire en ligne de commande (lecture seule) : `python3 -m core.cleanup_manager [--keys]`.
 
 ## Disposition du paquet .deb
 

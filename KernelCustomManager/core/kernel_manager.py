@@ -3,6 +3,8 @@ Module de gestion des kernels
 Logique métier pour télécharger, compiler, installer les kernels
 """
 
+import gi
+gi.require_version('Notify', '0.7')
 from gi.repository import Notify
 import subprocess
 import shutil

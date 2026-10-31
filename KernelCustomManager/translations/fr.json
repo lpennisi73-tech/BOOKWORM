@@ -493,5 +493,37 @@
       "sol_regenerate_initrd": "Régénérer l'initrd après la signature des modules",
       "sol_verify_sb_config": "Vérifier la configuration SecureBoot"
     }
+  },
+  "cleanup": {
+    "title": "🧹 Nettoyage du dossier de travail",
+    "subtitle": "Libérez de l'espace : sources, objets de compilation, paquets, logs…",
+    "scan": "Analyser",
+    "clean_selected": "Nettoyer la sélection",
+    "include_keys": "Afficher aussi les clés SecureBoot",
+    "total_selected": "Sélection : {size}",
+    "freed": "{size} libérés",
+    "nothing_selected": "Aucun élément sélectionné",
+    "confirm": "Nettoyer {count} élément(s) ({size}) ? Cette action est irréversible.",
+    "confirm_keys": "⚠️ La sélection contient des clés SecureBoot : sans elles, vous ne pourrez plus signer vos kernels avec la clé MOK enrôlée.",
+    "errors": "Certains éléments n'ont pas pu être nettoyés :",
+    "category": {
+      "build_objects": "Objets de compilation (make clean)",
+      "archives": "Archives et fichiers de paquetage",
+      "logs": "Logs de compilation",
+      "driver_downloads": "Pilotes téléchargés",
+      "sources": "Arbres de sources complets",
+      "headers": "Headers générés",
+      "packages": "Paquets .deb compilés",
+      "driver_backups": "Sauvegardes de pilotes",
+      "config_backups": "Sauvegardes de configurations",
+      "secureboot_keys": "Clés SecureBoot (MOK)"
+    },
+    "reason": {
+      "linked_usr_src": "Protégé : utilisé via /usr/src ou /lib/modules (DKMS)",
+      "running_kernel": "Protégé : kernel en cours d'exécution",
+      "active_build": "Dossier de compilation actif",
+      "installed_kernel": "Kernel installé (copie du paquet)",
+      "secureboot_keys": "Nécessaire pour signer les kernels"
+    }
   }
 }

@@ -493,5 +493,37 @@
       "sol_regenerate_initrd": "Regenerate initrd after signing modules",
       "sol_verify_sb_config": "Verify SecureBoot configuration"
     }
+  },
+  "cleanup": {
+    "title": "🧹 Working directory cleanup",
+    "subtitle": "Free up space: sources, build objects, packages, logs…",
+    "scan": "Scan",
+    "clean_selected": "Clean selection",
+    "include_keys": "Also show SecureBoot keys",
+    "total_selected": "Selected: {size}",
+    "freed": "{size} freed",
+    "nothing_selected": "Nothing selected",
+    "confirm": "Clean {count} item(s) ({size})? This cannot be undone.",
+    "confirm_keys": "⚠️ The selection contains SecureBoot keys: without them you will no longer be able to sign your kernels with the enrolled MOK key.",
+    "errors": "Some items could not be cleaned:",
+    "category": {
+      "build_objects": "Build objects (make clean)",
+      "archives": "Archives and packaging files",
+      "logs": "Build logs",
+      "driver_downloads": "Downloaded drivers",
+      "sources": "Full source trees",
+      "headers": "Generated headers",
+      "packages": "Built .deb packages",
+      "driver_backups": "Driver backups",
+      "config_backups": "Configuration backups",
+      "secureboot_keys": "SecureBoot keys (MOK)"
+    },
+    "reason": {
+      "linked_usr_src": "Protected: used via /usr/src or /lib/modules (DKMS)",
+      "running_kernel": "Protected: running kernel",
+      "active_build": "Active build directory",
+      "installed_kernel": "Installed kernel (package copy)",
+      "secureboot_keys": "Required to sign kernels"
+    }
   }
 }
