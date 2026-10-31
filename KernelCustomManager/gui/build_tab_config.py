@@ -84,7 +84,7 @@ def configure_from_system(main_window, run_menuconfig=True):
     try:
         shutil.copy(config_file, dest_config)
         
-        # Adaptation pour Ubuntu/Debian
+        # Adaptation Debian : pas de clés de confiance intégrées (sinon la compilation échoue)
         subprocess.run(
             ["sed", "-i", 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/', str(dest_config)],
             check=True

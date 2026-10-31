@@ -22,7 +22,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 ## Plan (un commit par étape)
 
 - [x] **1. CLAUDE.md** : plan et conventions (ce fichier)
-- [ ] **2. Retrait d'Ubuntu** : `core/driver_manager.py`, `core/secureboot_manager.py`, `gui/build_tab_*.py`, `install.sh`, `scripts/secureboot/fix_mok_not_appearing.sh` (`EFI/debian`), doc et traductions
+- [x] **2. Retrait d'Ubuntu** : `core/driver_manager.py`, `core/secureboot_manager.py`, `gui/build_tab_*.py`, `install.sh`, `scripts/secureboot/fix_mok_not_appearing.sh` (`EFI/debian`), doc et traductions
 - [ ] **3. Helper root en Python** : `kernelcustom-helper` réécrit en Python avec une **liste blanche d'actions** et la validation des chemins (uniquement dans `/usr/src`, le dossier de travail de l'utilisateur, `/boot`…). Supprimer `pkexec bash -c` (`gui/secureboot_tab.py`) et `shell=True` (`core/secureboot_manager.py`). Tous les `pkexec apt/dpkg/cp/systemctl` dispersés passent par le helper
 - [ ] **4. Portage du bash restant** : `manage_kernel_sources.sh` devient `core/sources_manager.py` (actions install, remove, link, unlink, list, exécutées via le helper). `scripts/secureboot/*.sh` est intégré dans `core/secureboot_manager.py` ou supprimé s'il fait doublon. `install_nvidia.sh` généré par `driver_manager.py` est remplacé par une action du helper
 - [ ] **5. Chemins centralisés** : nouveau module `utils/paths.py` (dossier de l'app, traductions, icônes, helper, dossier de travail XDG + migration). Plus de `Path(__file__).parent.parent` ni de `/usr/local/bin` codé en dur ailleurs. L'app doit fonctionner **installée ET lancée depuis le dépôt git**
@@ -81,6 +81,14 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - **Commits** : messages en français, préfixés `Fix:`, `Feat:`, `Refactor:`, `Release:`, `Docs:`.
 - Nettoyages en cours de route : `locale.getdefaultlocale()` (déprécié depuis Python 3.11+, à remplacer par `locale.getlocale()`) et les `except:` nus à remplacer par `except Exception:`.
 
+## Dette repérée (à traiter pendant le portage)
+
+- `core/secureboot_manager.py` `_fetch_mok_data` : `print("[DEBUG] …")` + `traceback.print_stack()` laissés dans le code. À remplacer par `logging.debug`.
+- Un appel `pkexec` (mokutil-diagnose) est lancé **au démarrage** par l'onglet SecureBoot. Il faudrait le différer jusqu'à l'ouverture de l'onglet ou une action de l'utilisateur.
+- `gui/drivers_tab.py` (fin de l'installation NVIDIA) : `response = GLib.idle_add(lambda: show_question(...))` renvoie un id de source GLib et non la réponse, donc le redémarrage proposé n'est jamais lancé. Ce sera corrigé naturellement avec les dialogues async GTK4.
+- `docs/ARCHITECTURE.md` : décrit encore GTK3, Ubuntu et AMD. À réécrire à l'étape Release.
+- `install.sh` : installe `debhelper-compat` (paquet virtuel). À revoir avec `debian/control` à l'étape 8.
+
 ## Commandes utiles
 
 ```bash
@@ -91,6 +99,10 @@ lintian ../kernelcustom-manager_*.deb        # vérifier le paquet
 ```
 
 ## Notes Debian 14
+
+- Sur testing/sid, `/etc/os-release` **ne contient pas `VERSION_ID`**. Il faut lire `/etc/debian_version` (ex. `forky/sid`). Utiliser `platform.freedesktop_os_release()` plutôt que de parser le fichier à la main.
+- Pilotes depuis les dépôts : NVIDIA = `nvidia-driver` (paquet unique, section **non-free**), `nvidia-open-kernel-dkms`, `nvidia-tesla-XXX-driver`. AMD/Intel = Mesa + `firmware-amd-graphics` / `firmware-intel-graphics`. Les versions sont lues via `apt-cache policy` avec `LC_ALL=C`.
+- Pilotes depuis le site officiel : **NVIDIA uniquement** (le `.run`). Pas d'`amdgpu-install` ni d'AMDGPU-PRO.
 
 - `mokutil` peut renvoyer un code de sortie non nul même quand sa sortie est valide (bug déjà observé sous Debian 13). D'où les `|| true` dans le helper actuel, à conserver dans la version Python.
 - Debian recompresse les modules (`CONFIG_MODULE_COMPRESS_XZ`) : il faut signer **avant** la compression ou re-signer après (voir `core/secureboot_manager.py`).

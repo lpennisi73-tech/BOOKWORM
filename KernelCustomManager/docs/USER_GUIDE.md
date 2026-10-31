@@ -37,7 +37,7 @@ python3 kernelcustom_manager.py
 
 ### System Requirements
 
-- Ubuntu 22.04/24.04 or Debian 11/12/13
+- Debian 13 (Trixie) or Debian 14 (Forky)
 - Python 3.8 or newer
 - GTK 3.0
 - At least 20 GB free disk space (for kernel compilation)
@@ -52,7 +52,7 @@ The GPU Drivers tab allows you to install, manage, and roll back GPU drivers for
 
 ### Features
 - 🔍 Automatic GPU detection
-- 📦 Installation from Ubuntu/Debian repositories (recommended)
+- 📦 Installation from Debian repositories (recommended)
 - 🌐 Installation from official websites (advanced)
 - 💾 Backup and rollback system
 - 📜 Complete operation history
@@ -68,14 +68,14 @@ The GPU Drivers tab allows you to install, manage, and roll back GPU drivers for
 3. The system will display:
    - **Detected GPU**: Your graphics card model
    - **Current driver**: The driver currently in use
-   - **Distribution**: Your Ubuntu/Debian version
+   - **Distribution**: Your Debian version
    - **Display Server**: X11 or Wayland
 
 **What you'll see:**
 ```
 Detected GPU: NVIDIA GeForce RTX 3060
 Current driver: nvidia-driver-535 (535.183.01)
-Distribution: ubuntu 24.04 (noble)
+Distribution: debian forky/sid (forky)
 Display Server: Wayland
 ```
 
@@ -111,7 +111,7 @@ This is the **safest and easiest method** for most users.
 3. Install if needed for improved video acceleration
 
 **Advantages:**
-- ✅ Stable and tested by Ubuntu/Debian
+- ✅ Stable and tested by Debian
 - ✅ Automatic updates via apt
 - ✅ Easy to remove or change
 - ✅ No risk of breaking your system
@@ -169,10 +169,8 @@ The driver will be installed on next reboot:
 You can monitor with: journalctl -u kernelcustom-nvidia-install.service
 ```
 
-**Steps for AMD:**
-1. Click **"🌐 Fetch Latest Version"**
-2. Application scrapes AMD website for the latest AMDGPU-PRO driver
-3. Download and installation follow similar process to NVIDIA
+**AMD Note:**
+On Debian, AMD GPUs use the free `amdgpu` kernel driver with Mesa and `firmware-amd-graphics` from the Debian repositories. Official website installation (AMDGPU-PRO / amdgpu-install) is Ubuntu-only and is not supported.
 
 **Intel Note:**
 Intel drivers are open source and integrated into the kernel. Official website installation is not supported (not needed).
@@ -217,7 +215,7 @@ Backups allow you to roll back to your previous driver if something goes wrong.
     "nvidia-dkms-535",
     "nvidia-utils-535"
   ],
-  "distro": "ubuntu 24.04",
+  "distro": "debian forky/sid",
   "display_server": "Wayland"
 }
 ```
@@ -233,8 +231,8 @@ If a new driver causes problems, you can restore a previous backup.
 2. You'll see a list of all backups:
    ```
    Backup ID              Driver             Distribution
-   backup_20251028_143000 nvidia-driver-535  ubuntu 24.04
-   backup_20251027_091500 nvidia-driver-530  ubuntu 24.04
+   backup_20251028_143000 nvidia-driver      debian 13
+   backup_20251027_091500 nvidia-driver      debian 13
    ```
 3. Select the backup you want to restore
 4. Click **"⏮️ Restore Backup"**
@@ -525,7 +523,7 @@ Manage installed kernels on your system.
 
 **Changing kernel at boot:**
 - Hold **Shift** during boot to see GRUB menu
-- Select **"Advanced options for Ubuntu"**
+- Select **"Advanced options for Debian GNU/Linux"**
 - Choose kernel version
 - Press Enter to boot
 
@@ -892,7 +890,7 @@ sudo apt install build-essential libncurses-dev bison flex libssl-dev libelf-dev
 
 **Recover from unbootable system:**
 If GRUB doesn't show:
-1. Boot from Ubuntu live USB
+1. Boot from a Debian live USB
 2. Mount your system partition
 3. Chroot into it
 4. Remove problematic kernel
@@ -1014,7 +1012,7 @@ A: **Repositories** for most users (stable, easy updates). **Official sites** on
 A: Use the Rollback feature to restore your previous driver. If system won't boot, use TTY (Ctrl+Alt+F3) or boot from live USB.
 
 **Q: Can I use this on other distributions?**
-A: Designed for Ubuntu/Debian. May work on derivatives (Linux Mint, Pop!_OS) but not tested on Fedora, Arch, etc.
+A: No. KernelCustom Manager targets Debian 13/14 only. Ubuntu and other distributions are not supported.
 
 **Q: How do I report bugs?**
 A: Contact the maintainer via https://git-srv.bookworm.ddns.net/BOOKWORM or see [CONTRIBUTING.md](CONTRIBUTING.md).

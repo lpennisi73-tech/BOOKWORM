@@ -9,77 +9,44 @@ echo "  Édition Professionnelle v2.3"
 echo "=========================================="
 echo ""
 
-# Détecter la distribution
+# Vérifier la distribution (Debian 13+ uniquement)
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    DISTRO=$ID
 else
-    echo "❌ Distribution non reconnue"
+    echo "❌ Distribution non reconnue (/etc/os-release absent)"
     exit 1
 fi
 
-echo "📦 Détection de la distribution: $DISTRO"
+if [ "$ID" != "debian" ]; then
+    echo "❌ KernelCustom Manager supporte uniquement Debian (détecté: $ID)"
+    exit 1
+fi
+
+echo "📦 Distribution: $PRETTY_NAME"
 echo ""
 
 # Installer les dépendances
 echo "📥 Installation des dépendances..."
 
-case "$DISTRO" in
-    ubuntu|debian|linuxmint)
-        sudo apt update
-        sudo apt install -y \
-            python3 \
-            python3-gi \
-            gir1.2-gtk-3.0 \
-            gir1.2-gtk-4.0 \
-            gir1.2-notify-0.7 \
-            libnotify-bin \
-            build-essential \
-            bc bison flex \
-            libssl-dev libelf-dev \
-            libncurses-dev \
-            fakeroot dpkg-dev \
-            curl tar xz-utils \
-            debhelper-compat \
-            libdw-dev rsync \
-            gawk dkms
-        ;;
-    
-    fedora)
-        sudo dnf install -y \
-            python3 \
-            python3-gobject \
-            gtk3 \
-            libnotify \
-            @development-tools \
-            bc bison flex \
-            openssl-devel elfutils-libelf-devel \
-            ncurses-devel \
-            fakeroot rpm-build \
-            curl tar xz
-        ;;
-    
-    arch|manjaro)
-        sudo pacman -S --noconfirm \
-            python \
-            python-gobject \
-            gtk3 \
-            libnotify \
-            base-devel \
-            bc bison flex \
-            openssl elfutils \
-            ncurses \
-            fakeroot \
-            curl tar xz
-        ;;
-    
-    *)
-        echo "⚠️  Distribution $DISTRO non supportée automatiquement"
-        echo "Installez manuellement les dépendances:"
-        echo "  - Python 3 + GTK 3 + libnotify"
-        echo "  - Outils de compilation (gcc, make, etc.)"
-        ;;
-esac
+sudo apt update
+sudo apt install -y \
+    python3 \
+    python3-gi \
+    gir1.2-gtk-3.0 \
+    gir1.2-gtk-4.0 \
+    gir1.2-adw-1 \
+    gir1.2-notify-0.7 \
+    libnotify-bin \
+    build-essential \
+    bc bison flex \
+    libssl-dev libelf-dev \
+    libncurses-dev \
+    fakeroot dpkg-dev \
+    curl tar xz-utils \
+    debhelper-compat \
+    libdw-dev rsync \
+    gawk dkms \
+    mokutil sbsigntool
 
 echo ""
 echo "✅ Dépendances installées"

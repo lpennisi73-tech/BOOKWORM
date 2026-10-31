@@ -714,11 +714,10 @@ class SecureBootManager:
         kernel_major_minor = '.'.join(kernel_version.split('.')[:2])
 
         possible_locations = [
-            # Ubuntu/Debian - headers actuels
+            # Headers du kernel courant
             Path("/usr/src/linux-headers-" + kernel_version) / "scripts" / "sign-file",
-            # Ubuntu - kbuild-tools
+            # Debian - linux-kbuild-X.Y
             Path("/usr/lib/linux-kbuild-" + kernel_major_minor) / "scripts" / "sign-file",
-            # Debian - kbuild-tools
             Path("/usr/lib/linux-kbuild-" + kernel_version.split('-')[0]) / "scripts" / "sign-file",
             # Module build symlink
             Path("/lib/modules") / kernel_version / "build" / "scripts" / "sign-file",
@@ -820,62 +819,27 @@ class SecureBootManager:
 
     def get_distribution_info(self):
         """
-        Détecte la distribution Linux (Debian vs Ubuntu vs autres)
-        Returns: dict avec 'id' (debian/ubuntu/unknown), 'version', 'is_debian_based'
+        Informations sur la distribution (l'application cible uniquement Debian)
+        Returns: dict avec 'id', 'version', 'is_debian'
+        Note: sur testing/sid, VERSION_ID est absent de /etc/os-release,
+        on utilise alors /etc/debian_version (ex: "forky/sid")
         """
+        info = {'id': 'unknown', 'version': '', 'is_debian': False}
         try:
-            # Méthode 1: lire /etc/os-release (standard)
-            os_release_file = Path("/etc/os-release")
-            if os_release_file.exists():
-                distro_info = {}
-                with open(os_release_file, 'r') as f:
-                    for line in f:
-                        if '=' in line:
-                            key, value = line.strip().split('=', 1)
-                            distro_info[key] = value.strip('"')
+            os_release = platform.freedesktop_os_release()
+            info['id'] = os_release.get('ID', 'unknown').lower()
+            info['version'] = os_release.get('VERSION_ID', '')
+        except OSError as e:
+            logging.warning(f"Failed to read os-release: {e}")
 
-                distro_id = distro_info.get('ID', '').lower()
-                version_id = distro_info.get('VERSION_ID', '')
-
-                return {
-                    'id': distro_id,
-                    'version': version_id,
-                    'is_debian_based': distro_id in ['debian', 'ubuntu'],
-                    'is_debian': distro_id == 'debian',
-                    'is_ubuntu': distro_id == 'ubuntu'
-                }
-        except Exception as e:
-            logging.warning(f"Failed to detect distribution: {e}")
-
-        # Fallback: unknown
-        return {
-            'id': 'unknown',
-            'version': '',
-            'is_debian_based': False,
-            'is_debian': False,
-            'is_ubuntu': False
-        }
-
-    def needs_post_bindeb_signing(self):
-        """
-        Vérifie si la distribution nécessite la signature APRÈS bindeb-pkg
-        (Debian 13+ recompresse les modules, Ubuntu ne le fait pas)
-        Returns: bool
-        """
-        distro = self.get_distribution_info()
-
-        # Debian 13+ (Trixie) recompresse les modules en .xz dans bindeb-pkg
-        if distro['is_debian']:
+        if not info['version']:
             try:
-                version_major = int(distro['version'].split('.')[0]) if distro['version'] else 0
-                # Debian 13+ (Trixie et versions suivantes)
-                return version_major >= 13
-            except:
-                # Si on ne peut pas déterminer la version, assumer Debian moderne
-                return True
+                info['version'] = Path('/etc/debian_version').read_text().strip()
+            except OSError:
+                pass
 
-        # Ubuntu ne recompresse pas (ou préserve les signatures)
-        return False
+        info['is_debian'] = info['id'] == 'debian'
+        return info
 
     def get_system_info(self):
         """Récupère les informations système pertinentes pour SecureBoot"""
@@ -901,7 +865,7 @@ class SecureBootManager:
         if not modules_dir.exists():
             return custom_kernels
 
-        # Patterns des kernels officiels à exclure (Debian et Ubuntu)
+        # Patterns des kernels officiels Debian à exclure
         # Ces kernels sont déjà signés par les distributeurs
         stock_patterns = [
             r'-amd64$',           # Debian: 6.8.12-amd64
@@ -909,11 +873,6 @@ class SecureBootManager:
             r'-686-pae$',         # Debian 32-bit PAE: 6.8.12-686-pae
             r'-cloud-amd64$',     # Debian cloud: 6.8.12-cloud-amd64
             r'-rt-amd64$',        # Debian realtime: 6.8.12-rt-amd64
-            r'-generic$',         # Ubuntu: 6.5.0-27-generic
-            r'-lowlatency$',      # Ubuntu lowlatency: 6.5.0-27-lowlatency
-            r'-azure$',           # Ubuntu Azure: 6.5.0-1018-azure
-            r'-aws$',             # Ubuntu AWS: 6.5.0-1018-aws
-            r'-gcp$',             # Ubuntu GCP: 6.5.0-1018-gcp
         ]
 
         import re

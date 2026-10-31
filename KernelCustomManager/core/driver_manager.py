@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import shutil
 import os
+import platform
 
 
 class DriverManager:
@@ -22,8 +23,6 @@ class DriverManager:
     # URLs officielles pour téléchargement
     NVIDIA_DOWNLOAD_BASE = "https://us.download.nvidia.com/XFree86/Linux-x86_64"
     NVIDIA_DOWNLOAD_PAGE = "https://www.nvidia.com/Download/processFind.aspx"
-    AMD_DOWNLOAD_BASE = "https://repo.radeon.com/amdgpu-install"
-    AMD_DOWNLOAD_PAGE = "https://www.amd.com/en/support/download/linux-drivers.html"
 
     def __init__(self, base_dir=None):
         if base_dir is None:
@@ -109,8 +108,10 @@ class DriverManager:
 
     def detect_distribution(self):
         """
-        Détecte la distribution Linux et sa version
+        Détecte la distribution (Debian) et sa version
         Retourne: dict avec name, version, codename, id
+        Note: sur testing/sid, /etc/os-release ne contient pas VERSION_ID,
+        on utilise alors /etc/debian_version (ex: "forky/sid")
         """
         distro_info = {
             'name': 'Unknown',
@@ -120,49 +121,18 @@ class DriverManager:
         }
 
         try:
-            # Lire /etc/os-release (standard pour la plupart des distributions)
-            with open('/etc/os-release', 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('NAME='):
-                        distro_info['name'] = line.split('=')[1].strip('"')
-                    elif line.startswith('VERSION_ID='):
-                        distro_info['version'] = line.split('=')[1].strip('"')
-                    elif line.startswith('VERSION_CODENAME='):
-                        distro_info['codename'] = line.split('=')[1].strip('"')
-                    elif line.startswith('ID='):
-                        distro_info['id'] = line.split('=')[1].strip('"')
+            os_release = platform.freedesktop_os_release()
+            distro_info['name'] = os_release.get('NAME', 'Unknown')
+            distro_info['id'] = os_release.get('ID', 'unknown')
+            distro_info['version'] = os_release.get('VERSION_ID', 'Unknown')
+            distro_info['codename'] = os_release.get('VERSION_CODENAME', 'Unknown')
+        except OSError:
+            pass
 
-            # Pour Ubuntu, mapper le codename si pas présent
-            if 'ubuntu' in distro_info['id'].lower():
-                version_to_codename = {
-                    '24.04': 'noble',
-                    '23.10': 'mantic',
-                    '23.04': 'lunar',
-                    '22.04': 'jammy',
-                    '20.04': 'focal',
-                    '18.04': 'bionic'
-                }
-                if distro_info['codename'] == 'Unknown' and distro_info['version'] in version_to_codename:
-                    distro_info['codename'] = version_to_codename[distro_info['version']]
-
-        except FileNotFoundError:
-            # Fallback to lsb_release
+        if distro_info['version'] == 'Unknown':
             try:
-                result = subprocess.run(
-                    ["lsb_release", "-a"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                for line in result.stdout.split('\n'):
-                    if 'Distributor ID:' in line:
-                        distro_info['id'] = line.split(':')[1].strip().lower()
-                    elif 'Release:' in line:
-                        distro_info['version'] = line.split(':')[1].strip()
-                    elif 'Codename:' in line:
-                        distro_info['codename'] = line.split(':')[1].strip()
-            except (subprocess.CalledProcessError, FileNotFoundError):
+                distro_info['version'] = Path('/etc/debian_version').read_text().strip()
+            except OSError:
                 pass
 
         return distro_info
@@ -337,30 +307,11 @@ class DriverManager:
             )
 
             if 'amdgpu' in result.stdout:
-                # Vérifier si AMDGPU-PRO ou Mesa
-                dpkg_result = subprocess.run(
-                    ["dpkg", "-l"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-
-                if 'amdgpu-pro' in dpkg_result.stdout:
-                    # Extraire version
-                    version_match = re.search(r'amdgpu-pro\s+(\S+)', dpkg_result.stdout)
-                    version = version_match.group(1) if version_match else 'Unknown'
-
-                    return {
-                        'name': 'AMDGPU-PRO',
-                        'version': version,
-                        'source': 'official'
-                    }
-                else:
-                    return {
-                        'name': 'AMDGPU (Mesa)',
-                        'version': 'Open Source',
-                        'source': 'opensource'
-                    }
+                return {
+                    'name': 'AMDGPU (Mesa)',
+                    'version': 'Open Source',
+                    'source': 'opensource'
+                }
 
             elif 'radeon' in result.stdout:
                 return {
@@ -407,7 +358,7 @@ class DriverManager:
 
     def get_available_drivers_from_repos(self, vendor):
         """
-        Liste les drivers disponibles dans les dépôts Ubuntu/Debian
+        Liste les drivers disponibles dans les dépôts Debian
         Retourne: liste de dicts avec name, version, description, recommended
         """
         if vendor == 'NVIDIA':
@@ -419,146 +370,103 @@ class DriverManager:
         else:
             return []
 
-    def _get_nvidia_from_repos(self):
-        """Liste drivers NVIDIA depuis apt"""
-        drivers = []
-
+    def _get_repo_candidates(self, packages):
+        """
+        Retourne {paquet: version candidate} pour les paquets disponibles dans apt
+        (les paquets absents des dépôts configurés sont ignorés)
+        """
+        candidates = {}
         try:
             result = subprocess.run(
-                ["apt-cache", "search", "nvidia-driver-"],
+                ["apt-cache", "policy"] + list(packages),
+                capture_output=True,
+                text=True,
+                check=True,
+                env={**os.environ, 'LC_ALL': 'C'}  # sortie non traduite pour le parsing
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return candidates
+
+        current = None
+        for line in result.stdout.splitlines():
+            if line and not line.startswith(' ') and line.endswith(':'):
+                current = line[:-1].split(':')[0]
+            elif current and line.strip().startswith('Candidate:'):
+                version = line.split(':', 1)[1].strip()
+                if version and version != '(none)':
+                    candidates[current] = version
+        return candidates
+
+    def _list_repo_drivers(self, catalog):
+        """
+        catalog: liste de (paquet, description, recommandé)
+        Retourne la liste des drivers présents dans les dépôts
+        """
+        candidates = self._get_repo_candidates([name for name, _, _ in catalog])
+        return [
+            {
+                'name': name,
+                'version': candidates[name],
+                'description': description,
+                'recommended': recommended
+            }
+            for name, description, recommended in catalog
+            if name in candidates
+        ]
+
+    def is_nonfree_enabled(self):
+        """Vérifie si la section non-free (requise pour NVIDIA) est activée dans apt"""
+        return bool(self._get_repo_candidates(['nvidia-driver']))
+
+    def _get_nvidia_from_repos(self):
+        """
+        Liste drivers NVIDIA depuis les dépôts Debian (section non-free)
+        Debian fournit un paquet nvidia-driver unique (pas de nvidia-driver-XXX)
+        plus les branches Tesla (nvidia-tesla-XXX-driver)
+        """
+        catalog = [
+            ('nvidia-driver', 'NVIDIA driver metapackage (Debian non-free)', True),
+            ('nvidia-open-kernel-dkms', 'NVIDIA open GPU kernel modules (Turing+, DKMS)', False),
+        ]
+
+        # Branches Tesla disponibles (nvidia-tesla-535-driver, ...)
+        try:
+            result = subprocess.run(
+                ["apt-cache", "search", "--names-only", r"^nvidia-tesla-[0-9]+-driver$"],
                 capture_output=True,
                 text=True,
                 check=True
             )
-
-            # Parser le résultat
-            seen = set()
-            for line in result.stdout.split('\n'):
-                # Format: nvidia-driver-550 - NVIDIA driver metapackage
-                match = re.match(r'(nvidia-driver-(\d+))\s+-\s+(.+)', line)
-                if match:
-                    package_name = match.group(1)
-                    version = match.group(2)
-                    description = match.group(3)
-
-                    if package_name not in seen:
-                        seen.add(package_name)
-
-                        # Vérifier si c'est le recommandé (généralement le plus récent stable)
-                        recommended = version in ['550', '560']  # Mettre à jour selon les versions
-
-                        drivers.append({
-                            'name': package_name,
-                            'version': version,
-                            'description': description,
-                            'recommended': recommended
-                        })
-
-            # Trier par version (décroissant)
-            drivers.sort(key=lambda x: int(x['version']), reverse=True)
-
+            tesla = sorted(
+                (line.split(' - ')[0].strip() for line in result.stdout.splitlines() if ' - ' in line),
+                reverse=True
+            )
+            catalog += [(name, 'NVIDIA Tesla/datacenter driver branch', False) for name in tesla]
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
-        return drivers
+        return self._list_repo_drivers(catalog)
 
     def _get_amd_from_repos(self):
-        """Liste drivers AMD depuis apt"""
-        drivers = []
-
-        try:
-            # AMD dans les dépôts Ubuntu utilise généralement mesa
-            result = subprocess.run(
-                ["apt-cache", "search", "mesa"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            # Chercher les paquets mesa principaux
-            for line in result.stdout.split('\n'):
-                if 'mesa-vulkan-drivers' in line and 'mesa-vulkan-drivers' not in [d['name'] for d in drivers]:
-                    drivers.append({
-                        'name': 'mesa-vulkan-drivers',
-                        'version': 'Latest',
-                        'description': 'Mesa Vulkan drivers (Open Source)',
-                        'recommended': True
-                    })
-                elif 'libgl1-mesa-dri' in line and 'libgl1-mesa-dri' not in [d['name'] for d in drivers]:
-                    drivers.append({
-                        'name': 'libgl1-mesa-dri',
-                        'version': 'Latest',
-                        'description': 'Mesa DRI drivers (Open Source)',
-                        'recommended': True
-                    })
-
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-        return drivers
+        """Liste drivers AMD depuis les dépôts Debian (Mesa + firmware non-free-firmware)"""
+        return self._list_repo_drivers([
+            ('firmware-amd-graphics', 'AMD GPU firmware (required by amdgpu)', True),
+            ('mesa-vulkan-drivers', 'Mesa Vulkan drivers (RADV)', True),
+            ('libgl1-mesa-dri', 'Mesa DRI OpenGL drivers', True),
+            ('mesa-va-drivers', 'Mesa VA-API drivers (video acceleration)', False),
+            ('xserver-xorg-video-amdgpu', 'X.Org AMDGPU display driver (X11 only)', False),
+        ])
 
     def _get_intel_from_repos(self):
-        """Liste drivers Intel depuis apt"""
-        drivers = []
-
-        try:
-            # Intel utilise principalement Mesa pour l'accélération 3D
-            result = subprocess.run(
-                ["apt-cache", "search", "intel"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            # Chercher les paquets Intel
-            packages_found = set()
-            for line in result.stdout.split('\n'):
-                if 'intel-media-va-driver' in line and 'intel-media-va-driver' not in packages_found:
-                    packages_found.add('intel-media-va-driver')
-                    drivers.append({
-                        'name': 'intel-media-va-driver',
-                        'version': 'Latest',
-                        'description': 'VA-API driver for Intel (hardware acceleration)',
-                        'recommended': True
-                    })
-                elif 'mesa-vulkan-drivers' in line and 'mesa-vulkan-drivers' not in packages_found:
-                    packages_found.add('mesa-vulkan-drivers')
-                    drivers.append({
-                        'name': 'mesa-vulkan-drivers',
-                        'version': 'Latest',
-                        'description': 'Mesa Vulkan drivers (includes Intel ANV)',
-                        'recommended': True
-                    })
-                elif 'xserver-xorg-video-intel' in line and 'xserver-xorg-video-intel' not in packages_found:
-                    packages_found.add('xserver-xorg-video-intel')
-                    drivers.append({
-                        'name': 'xserver-xorg-video-intel',
-                        'version': 'Latest',
-                        'description': 'X.Org X server -- Intel display driver (Legacy)',
-                        'recommended': False
-                    })
-                elif 'intel-gpu-tools' in line and 'intel-gpu-tools' not in packages_found:
-                    packages_found.add('intel-gpu-tools')
-                    drivers.append({
-                        'name': 'intel-gpu-tools',
-                        'version': 'Latest',
-                        'description': 'Tools for debugging Intel graphics',
-                        'recommended': False
-                    })
-
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-        # Note pour l'utilisateur
-        if not drivers:
-            drivers.append({
-                'name': 'mesa-vulkan-drivers',
-                'version': 'Latest',
-                'description': 'Intel uses Mesa drivers (open source, included in kernel)',
-                'recommended': True
-            })
-
-        return drivers
+        """Liste drivers Intel depuis les dépôts Debian (Mesa + VA-API + firmware)"""
+        return self._list_repo_drivers([
+            ('firmware-intel-graphics', 'Intel GPU firmware (GuC/HuC/DMC)', True),
+            ('mesa-vulkan-drivers', 'Mesa Vulkan drivers (ANV)', True),
+            ('intel-media-va-driver', 'VA-API driver for Intel (hardware acceleration)', True),
+            ('intel-media-va-driver-non-free', 'VA-API driver for Intel with non-free encoders', False),
+            ('xserver-xorg-video-intel', 'X.Org Intel display driver (legacy)', False),
+            ('intel-gpu-tools', 'Tools for debugging Intel graphics', False),
+        ])
 
     def get_official_driver_info(self, vendor):
         """
@@ -567,10 +475,7 @@ class DriverManager:
         """
         if vendor == 'NVIDIA':
             return self._get_nvidia_official_info()
-        elif vendor == 'AMD':
-            return self._get_amd_official_info()
-        else:
-            return None
+        return None
 
     def _get_nvidia_official_info(self):
         """
@@ -594,30 +499,6 @@ class DriverManager:
             'date': latest['date'],
             'size': '~350 MB',
             'filename': f"NVIDIA-Linux-x86_64-{latest['version']}.run"
-        }
-
-    def _get_amd_official_info(self):
-        """
-        Récupère la dernière version AMD officielle
-        Note: Version simplifiée
-        """
-        # Versions connues
-        known_versions = [
-            {'version': '6.2.3', 'ubuntu': '22.04'},
-            {'version': '6.1.3', 'ubuntu': '22.04'},
-        ]
-
-        latest = known_versions[0]
-        # AMD utilise des URLs complexes avec version ubuntu
-        url = f"{self.AMD_DOWNLOAD_BASE}/{latest['version']}/ubuntu/jammy/amdgpu-install_{latest['version'].replace('.', '')}-1_all.deb"
-
-        return {
-            'version': latest['version'],
-            'url': url,
-            'date': '2024-11-01',
-            'size': '~2 MB',
-            'filename': f"amdgpu-install_{latest['version']}-1_all.deb",
-            'note': 'This package installs the amdgpu-install script'
         }
 
     def install_from_repos(self, package_name, progress_callback=None):
@@ -732,30 +613,6 @@ class DriverManager:
         except Exception as e:
             return (False, f"Erreur: {str(e)}")
 
-    def install_amd_deb_file(self, deb_file_path, progress_callback=None):
-        """
-        Installe le paquet .deb AMD (qui installe amdgpu-install)
-        Retourne: (success: bool, message: str)
-        """
-        try:
-            if progress_callback:
-                progress_callback("Installation du paquet AMD...", 0.3)
-
-            result = subprocess.run(
-                ["pkexec", "dpkg", "-i", str(deb_file_path)],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            if progress_callback:
-                progress_callback("Installation terminée", 1.0)
-
-            return (True, "Paquet AMD installé. Utilisez 'amdgpu-install --usecase=graphics' pour installer les drivers.")
-
-        except subprocess.CalledProcessError as e:
-            return (False, f"Erreur d'installation: {e.stderr}")
-
     def remove_driver(self, vendor, progress_callback=None):
         """
         Supprime le driver propriétaire
@@ -781,17 +638,6 @@ class DriverManager:
                     )
 
                 return (True, "Driver NVIDIA supprimé. Un redémarrage est recommandé.")
-
-            elif vendor == 'AMD':
-                if progress_callback:
-                    progress_callback("Suppression du driver AMD...", 0.3)
-
-                subprocess.run(
-                    ["pkexec", "apt-get", "remove", "--purge", "-y", "amdgpu-pro", "amdgpu-install"],
-                    capture_output=True
-                )
-
-                return (True, "Driver AMD supprimé. Un redémarrage est recommandé.")
 
             return (False, "Fabricant non supporté")
 
@@ -834,53 +680,6 @@ class DriverManager:
                 progress_callback(f"Erreur de scraping: {str(e)}", 0.0)
 
         return None
-
-    def scrape_amd_latest_version(self, progress_callback=None):
-        """
-        Scrape pour obtenir la dernière version AMD
-        Retourne: dict avec version, url, date ou None
-        """
-        try:
-            if progress_callback:
-                progress_callback("Récupération des dernières versions AMD...", 0.2)
-
-            # AMD organise par version Ubuntu
-            codename = self.distro_info['codename']
-
-            # Mapper le codename Ubuntu à l'URL AMD
-            codename_map = {
-                'noble': '24.04',
-                'jammy': '22.04',
-                'focal': '20.04'
-            }
-
-            ubuntu_version = codename_map.get(codename, '22.04')
-
-            # Version hardcodée connue (scraping AMD est complexe)
-            version = '6.2.3'
-            version_num = version.replace('.', '')
-
-            url = f"{self.AMD_DOWNLOAD_BASE}/{version}/ubuntu/{codename}/amdgpu-install_{version_num}-1_all.deb"
-
-            return {
-                'version': version,
-                'url': url,
-                'date': datetime.now().strftime('%Y-%m-%d'),
-                'size': '~2 MB',
-                'filename': f"amdgpu-install_{version_num}-1_all.deb",
-                'note': 'This package installs the amdgpu-install script',
-                'ubuntu_version': ubuntu_version
-            }
-
-        except Exception as e:
-            if progress_callback:
-                progress_callback(f"Erreur: {str(e)}", 0.0)
-
-        return None
-
-    # ==========================================
-    # SYSTÈME DE ROLLBACK
-    # ==========================================
 
     def create_driver_backup(self, vendor, progress_callback=None):
         """

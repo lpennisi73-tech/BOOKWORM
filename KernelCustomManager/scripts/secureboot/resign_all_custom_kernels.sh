@@ -173,7 +173,7 @@ if [ ${FAILED_COUNT} -eq 0 ]; then
     echo -e "     ${GREEN}sudo reboot${NC}"
     echo ""
     echo -e "  2. Au démarrage, sélectionnez un kernel custom dans GRUB"
-    echo -e "     (Advanced options for Ubuntu → 6.17.10-kernelcustom...)"
+    echo -e "     (Options avancées pour Debian GNU/Linux → 6.17.10-kernelcustom...)"
     echo ""
     echo -e "  3. Votre kernel devrait maintenant booter sans erreur !"
     echo ""

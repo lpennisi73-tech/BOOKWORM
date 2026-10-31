@@ -97,7 +97,7 @@ fi
 
 if [ "${BOOTLOADER_STATUS}" = "found" ]; then
     # Vérifier si shim existe
-    SHIM_PATH="${EFI_MOUNT}/EFI/ubuntu/shimx64.efi"
+    SHIM_PATH="${EFI_MOUNT}/EFI/debian/shimx64.efi"
     if [ -f "${SHIM_PATH}" ]; then
         echo -e "      ${GREEN}✅ shim trouvé: ${SHIM_PATH}${NC}"
     else
@@ -105,7 +105,7 @@ if [ "${BOOTLOADER_STATUS}" = "found" ]; then
     fi
 
     # Vérifier si mmx64.efi existe (MOK Manager)
-    MOK_MANAGER="${EFI_MOUNT}/EFI/ubuntu/mmx64.efi"
+    MOK_MANAGER="${EFI_MOUNT}/EFI/debian/mmx64.efi"
     if [ -f "${MOK_MANAGER}" ]; then
         echo -e "      ${GREEN}✅ MOK Manager trouvé: ${MOK_MANAGER}${NC}"
     else
@@ -176,7 +176,7 @@ elif [ "${PENDING_STATUS}" = "pending" ]; then
     echo -e "2. ${YELLOW}UEFI ne boot pas via shim${NC}"
     echo -e "   Solution:"
     echo -e "   a) Redémarrez dans le BIOS (F2/F10/F12/DEL)"
-    echo -e "   b) Boot Manager → Vérifiez que 'ubuntu' est premier"
+    echo -e "   b) Boot Manager → Vérifiez que 'debian' est premier"
     echo -e "   c) Si nécessaire: sudo efibootmgr -v"
     echo ""
     echo -e "3. ${YELLOW}Fast Boot interfère${NC}"

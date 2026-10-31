@@ -158,13 +158,8 @@ The helper script:
 ## Compatibility
 
 **Supported distributions:**
-- Ubuntu 18.04+
-- Debian 10+
-- Fedora 30+
-- Arch Linux
-- Linux Mint
-- Pop!_OS
-- Any distribution with PolicyKit/polkit
+- Debian 13 (Trixie)
+- Debian 14 (Forky)
 
 **Requirements:**
 - PolicyKit (polkit) installed

@@ -36,13 +36,8 @@ We are actively seeking testers with various GPU configurations:
 - Integrated graphics (UHD Graphics 770, etc.)
 
 #### Distributions to Test
-- Ubuntu 22.04 LTS (Jammy Jellyfish)
-- Ubuntu 24.04 LTS (Noble Numbat)
-- Debian 11 (Bullseye)
-- Debian 12 (Bookworm)
-- Linux Mint 21.x
-- Linux Mint 22.x
-- Pop!_OS 22.04
+- Debian 13 (Trixie)
+- Debian 14 (Forky)
 
 #### Display Servers
 - X11
@@ -71,7 +66,7 @@ Help improve documentation by:
 
 ### Prerequisites
 ```bash
-# Ubuntu/Debian
+# Debian
 sudo apt update
 sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-notify-0.7
 
@@ -337,7 +332,7 @@ git commit -m "Add support for nouveau driver detection
 - Added nouveau driver detection in driver_manager.py
 - Updated GUI to display nouveau version
 - Added French/English translations
-- Tested on Ubuntu 22.04 with GTX 1060"
+- Tested on Debian 14 with GTX 1060"
 ```
 
 **Commit Message Guidelines:**
@@ -373,7 +368,7 @@ Why is this change needed?
 - Fixed Z
 
 ## Testing
-- [ ] Tested on Ubuntu 22.04
+- [ ] Tested on Debian 14
 - [ ] Tested on Debian 12
 - [ ] Tested with NVIDIA GPU
 - [ ] Tested with AMD GPU
@@ -417,7 +412,7 @@ What actually happens
 [If applicable]
 
 **System Information:**
-- OS: [e.g., Ubuntu 24.04]
+- OS: [e.g., Debian 14 (forky)]
 - Kernel: [uname -r output]
 - GPU: [Model]
 - Display Server: [X11/Wayland]

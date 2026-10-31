@@ -162,7 +162,7 @@ Ces scripts utilisent/génèrent les fichiers suivants :
 ### Compatibilité
 - Nécessite un système UEFI (pas BIOS Legacy)
 - SecureBoot doit être activé dans le BIOS
-- Testé sur Ubuntu/Debian
+- Testé sur Debian 13/14
 
 ### Outils requis
 - `mokutil` (généralement pré-installé)

@@ -789,7 +789,7 @@ def install_dependencies(main_window, sb_manager, deps_label, i18n):
         show_info_dialog(main_window, i18n._("secureboot.all_dependencies_installed"), i18n)
         return
 
-    # Mapper les outils vers les packages Debian/Ubuntu
+    # Mapper les outils vers les paquets Debian
     packages = []
     package_descriptions = []
 

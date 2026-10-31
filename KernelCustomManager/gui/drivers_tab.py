@@ -382,6 +382,11 @@ def refresh_gpu_info(driver_manager, gpu_label, current_driver_label, repos_stor
             repos_store.clear()
             if vendor in ['NVIDIA', 'AMD', 'Intel']:
                 drivers = driver_manager.get_available_drivers_from_repos(vendor)
+                if vendor == 'NVIDIA' and not driver_manager.is_nonfree_enabled():
+                    current_driver_label.set_markup(
+                        current_driver_label.get_label() +
+                        f"\n<span color='orange'>⚠ {i18n._('drivers.nonfree_required')}</span>"
+                    )
                 for driver in drivers:
                     name = driver['name']
                     if driver['recommended']:
@@ -657,9 +662,8 @@ def scrape_and_display_official(main_window, driver_manager, info_label, gpu_lab
     vendor = None
     if 'NVIDIA' in gpu_text:
         vendor = 'NVIDIA'
-    elif 'AMD' in gpu_text:
-        vendor = 'AMD'
     else:
+        # AMD et Intel : pilotes libres fournis par les dépôts Debian uniquement
         info_label.set_markup(
             f"<span color='red'>{i18n._('drivers.scraping_not_supported')}</span>"
         )
@@ -700,10 +704,7 @@ def scrape_and_display_official(main_window, driver_manager, info_label, gpu_lab
 
         pulse_id = GLib.timeout_add(100, pulse)
 
-        if vendor == 'NVIDIA':
-            official_info = driver_manager.scrape_nvidia_latest_version(progress_callback=update_progress)
-        else:
-            official_info = driver_manager.scrape_amd_latest_version(progress_callback=update_progress)
+        official_info = driver_manager.scrape_nvidia_latest_version(progress_callback=update_progress)
 
         GLib.source_remove(pulse_id)
         GLib.idle_add(dialog.destroy)
@@ -744,8 +745,6 @@ def download_and_install_official(main_window, driver_manager, info_label, gpu_l
     vendor = None
     if 'NVIDIA' in gpu_text:
         vendor = 'NVIDIA'
-    elif 'AMD' in gpu_text:
-        vendor = 'AMD'
 
     if not vendor:
         main_window.dialogs.show_error(
@@ -824,17 +823,11 @@ def download_and_install_official(main_window, driver_manager, info_label, gpu_l
             ))
             return
 
-        # Installer intelligemment (NVIDIA uniquement pour l'instant)
-        if vendor == 'NVIDIA':
-            success, install_msg = driver_manager.install_nvidia_intelligently(
-                filepath,
-                progress_callback=update_progress
-            )
-        else:  # AMD
-            success, install_msg = driver_manager.install_amd_deb_file(
-                filepath,
-                progress_callback=update_progress
-            )
+        # Installer intelligemment (NVIDIA uniquement)
+        success, install_msg = driver_manager.install_nvidia_intelligently(
+            filepath,
+            progress_callback=update_progress
+        )
 
         GLib.idle_add(dialog.destroy)
 
@@ -890,7 +883,11 @@ def remove_current_driver(main_window, driver_manager, gpu_label, current_driver
     if 'NVIDIA' in gpu_text:
         vendor = 'NVIDIA'
     elif 'AMD' in gpu_text:
-        vendor = 'AMD'
+        main_window.dialogs.show_info(
+            i18n._("message.info.title"),
+            i18n._("drivers.amd_no_removal")
+        )
+        return
     elif 'Intel' in gpu_text:
         main_window.dialogs.show_info(
             i18n._("message.info.title"),

@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-red.svg)](LICENSE)
 [![Language](https://img.shields.io/badge/language-FR%20%7C%20EN-yellow.svg)](translations/)
 
-**KernelCustom Manager** est un gestionnaire complet de kernels Linux et de drivers GPU pour Ubuntu/Debian, offrant une interface graphique intuitive pour :
+**KernelCustom Manager** est un gestionnaire complet de kernels Linux et de drivers GPU pour **Debian 13/14**, offrant une interface graphique intuitive pour :
 - 🔧 Compiler et gérer des kernels personnalisés
 - 🎮 Installer et gérer des drivers GPU (NVIDIA, AMD, Intel)
 - 🔒 Gérer SecureBoot et signer les modules kernel
@@ -30,8 +30,8 @@
 - **Support multi-fabricants** : NVIDIA, AMD, Intel
 - **Détection automatique** : GPU, distribution, serveur d'affichage (X11/Wayland)
 - **Installation intelligente** :
-  - Depuis dépôts Ubuntu/Debian (recommandé)
-  - Depuis sites officiels avec web scraping dynamique
+  - Depuis les dépôts Debian (recommandé)
+  - NVIDIA : depuis le site officiel avec web scraping dynamique (avancé)
   - Installation NVIDIA automatisée avec service systemd
 - **Système de rollback** : Sauvegarde automatique avant installation
 - **Historique complet** : Traçabilité de toutes les opérations
@@ -64,7 +64,7 @@
 
 ### Prérequis
 ```bash
-# Ubuntu/Debian
+# Debian
 sudo apt update
 sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-notify-0.7
 
@@ -202,7 +202,7 @@ KernelCustom Manager détecte automatiquement votre environnement graphique (X11
 ### 🌐 Web Scraping Dynamique
 Les versions officielles sont récupérées en temps réel :
 - **NVIDIA** : `https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt`
-- **AMD** : URLs adaptatives selon votre distribution Ubuntu
+- **AMD / Intel** : pilotes libres (Mesa + firmware) depuis les dépôts Debian uniquement
 
 ### 💾 Système de Rollback Professionnel
 Avant chaque installation, KernelCustom Manager propose de créer une sauvegarde :
@@ -218,12 +218,12 @@ Toutes les opérations sont enregistrées :
   "timestamp": "2025-10-28T14:30:00",
   "action": "install",
   "vendor": "NVIDIA",
-  "driver_name": "nvidia-driver-550",
+  "driver_name": "nvidia-driver",
   "driver_version": "550.127.05",
   "source": "repository",
   "success": true,
   "display_server": "Wayland",
-  "distro": "ubuntu 24.04"
+  "distro": "debian forky/sid"
 }
 ```
 
@@ -315,13 +315,13 @@ Nous cherchons des testeurs avec :
 - **GPU NVIDIA** : RTX 4000/3000, GTX 1000 series
 - **GPU AMD** : Radeon RX 7000/6000, Vega
 - **GPU Intel** : Iris Xe, Arc A-series
-- **Distributions** : Ubuntu 22.04/24.04, Debian 11/12, Linux Mint
+- **Distributions** : Debian 13 (Trixie), Debian 14 (Forky)
 
 ---
 
 ## 📊 Comparaison avec Autres Outils
 
-| Fonctionnalité | KernelCustom Manager | ubuntu-drivers | Driver Manager | nvidia-settings |
+| Fonctionnalité | KernelCustom Manager | nvidia-detect | Driver Manager | nvidia-settings |
 |----------------|---------------------|----------------|----------------|-----------------|
 | Support NVIDIA | ✅ Complet | ✅ Basique | ✅ Basique | ✅ Config uniquement |
 | Support AMD | ✅ Complet | ❌ | ✅ Basique | ❌ |
@@ -340,11 +340,11 @@ Nous cherchons des testeurs avec :
 ## ⚠️ Avertissements
 
 ### Drivers depuis Sites Officiels
-L'installation depuis les sites officiels (NVIDIA.com, AMD.com) est une **opération avancée** :
+L'installation depuis le site officiel NVIDIA est une **opération avancée** :
 - Peut nécessiter un redémarrage en mode console
 - Peut causer des problèmes de compatibilité
 - Complique les mises à jour automatiques
-- **L'installation depuis les dépôts Ubuntu est recommandée**
+- **L'installation depuis les dépôts Debian (section non-free) est recommandée**
 
 ### Compilation de Kernels
 La compilation de kernels personnalisés :

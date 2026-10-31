@@ -125,56 +125,52 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, sign_for_secureboot=
 
     start_time = datetime.now()
 
-    # Détecter la distribution pour adapter la configuration
     sb_manager = main_window.secureboot_manager
-    distro_info = sb_manager.get_distribution_info()
-    is_debian = distro_info['is_debian']
 
-    # Sur Debian, désactiver la compression des modules dans le .config
-    # Ubuntu ne compresse pas par défaut, Debian active CONFIG_MODULE_COMPRESS_XZ
-    if is_debian:
-        config_file = linux_dir / ".config"
-        if config_file.exists():
-            # Lire le fichier .config
-            with open(config_file, 'r') as f:
-                config_content = f.read()
+    # Debian active CONFIG_MODULE_COMPRESS_XZ : on désactive la compression des modules
+    # dans le .config pour que les signatures SecureBoot posées avant bindeb-pkg restent valides
+    config_file = linux_dir / ".config"
+    if config_file.exists():
+        # Lire le fichier .config
+        with open(config_file, 'r') as f:
+            config_content = f.read()
 
-            # Désactiver toutes les options de compression des modules
-            config_modified = False
+        # Désactiver toutes les options de compression des modules
+        config_modified = False
 
-            # Désactiver CONFIG_MODULE_COMPRESS (option principale)
-            if 'CONFIG_MODULE_COMPRESS=y' in config_content:
-                config_content = config_content.replace('CONFIG_MODULE_COMPRESS=y', '# CONFIG_MODULE_COMPRESS is not set')
-                config_modified = True
+        # Désactiver CONFIG_MODULE_COMPRESS (option principale)
+        if 'CONFIG_MODULE_COMPRESS=y' in config_content:
+            config_content = config_content.replace('CONFIG_MODULE_COMPRESS=y', '# CONFIG_MODULE_COMPRESS is not set')
+            config_modified = True
 
-            # Désactiver CONFIG_MODULE_COMPRESS_ALL
-            if 'CONFIG_MODULE_COMPRESS_ALL=y' in config_content:
-                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ALL=y', '# CONFIG_MODULE_COMPRESS_ALL is not set')
-                config_modified = True
+        # Désactiver CONFIG_MODULE_COMPRESS_ALL
+        if 'CONFIG_MODULE_COMPRESS_ALL=y' in config_content:
+            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ALL=y', '# CONFIG_MODULE_COMPRESS_ALL is not set')
+            config_modified = True
 
-            # Désactiver les algorithmes de compression spécifiques
-            if 'CONFIG_MODULE_COMPRESS_XZ=y' in config_content:
-                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_XZ=y', '# CONFIG_MODULE_COMPRESS_XZ is not set')
-                config_modified = True
-            if 'CONFIG_MODULE_COMPRESS_GZIP=y' in config_content:
-                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_GZIP=y', '# CONFIG_MODULE_COMPRESS_GZIP is not set')
-                config_modified = True
-            if 'CONFIG_MODULE_COMPRESS_ZSTD=y' in config_content:
-                config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ZSTD=y', '# CONFIG_MODULE_COMPRESS_ZSTD is not set')
-                config_modified = True
+        # Désactiver les algorithmes de compression spécifiques
+        if 'CONFIG_MODULE_COMPRESS_XZ=y' in config_content:
+            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_XZ=y', '# CONFIG_MODULE_COMPRESS_XZ is not set')
+            config_modified = True
+        if 'CONFIG_MODULE_COMPRESS_GZIP=y' in config_content:
+            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_GZIP=y', '# CONFIG_MODULE_COMPRESS_GZIP is not set')
+            config_modified = True
+        if 'CONFIG_MODULE_COMPRESS_ZSTD=y' in config_content:
+            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ZSTD=y', '# CONFIG_MODULE_COMPRESS_ZSTD is not set')
+            config_modified = True
 
-            # Ajouter CONFIG_MODULE_COMPRESS_NONE=y si pas présent
-            if 'CONFIG_MODULE_COMPRESS_NONE' not in config_content:
-                config_content += '\nCONFIG_MODULE_COMPRESS_NONE=y\n'
-                config_modified = True
-            elif 'CONFIG_MODULE_COMPRESS_NONE is not set' in config_content:
-                config_content = config_content.replace('# CONFIG_MODULE_COMPRESS_NONE is not set', 'CONFIG_MODULE_COMPRESS_NONE=y')
-                config_modified = True
+        # Ajouter CONFIG_MODULE_COMPRESS_NONE=y si pas présent
+        if 'CONFIG_MODULE_COMPRESS_NONE' not in config_content:
+            config_content += '\nCONFIG_MODULE_COMPRESS_NONE=y\n'
+            config_modified = True
+        elif 'CONFIG_MODULE_COMPRESS_NONE is not set' in config_content:
+            config_content = config_content.replace('# CONFIG_MODULE_COMPRESS_NONE is not set', 'CONFIG_MODULE_COMPRESS_NONE=y')
+            config_modified = True
 
-            # Sauvegarder le .config modifié
-            if config_modified:
-                with open(config_file, 'w') as f:
-                    f.write(config_content)
+        # Sauvegarder le .config modifié
+        if config_modified:
+            with open(config_file, 'w') as f:
+                f.write(config_content)
 
     # Préparer la signature SecureBoot (TOUJOURS avant bindeb-pkg, simple et fiable)
     signing_before_bindeb = ""
@@ -283,7 +279,7 @@ echo '{i18n._("compilation.threads", count=jobs)}'
 echo '{i18n._("compilation.suffix", suffix=(suffix or i18n._("compilation.suffix_none")))}'
 echo '{i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no")))}'
 {"echo 'SecureBoot Signing: " + i18n._("compilation.fakeroot_yes") + " (AVANT bindeb-pkg)'" if sign_for_secureboot else ""}
-{"echo 'Distribution: Debian (CONFIG_MODULE_COMPRESS_NONE activé)'" if is_debian and sign_for_secureboot else ""}
+{"echo 'Distribution: Debian (CONFIG_MODULE_COMPRESS_NONE activé)'" if sign_for_secureboot else ""}
 echo ''
 echo '{i18n._("compilation.starting")}'
 sleep 2
