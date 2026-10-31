@@ -146,4 +146,4 @@ lintian ../kernelcustom-manager_*.deb        # vérifier le paquet
 
 - `mokutil` peut renvoyer un code de sortie non nul même quand sa sortie est valide (bug déjà observé sous Debian 13). D'où les `|| true` dans le helper actuel, à conserver dans la version Python.
 - Debian recompresse les modules (`CONFIG_MODULE_COMPRESS_XZ`) : il faut signer **avant** la compression ou re-signer après (voir `core/secureboot_manager.py`).
-- `modinfo` sur les modules signés demande les droits root (action `modinfo-check` du helper).
+- `modinfo` et `lsmod` sont dans `/usr/sbin`, **absent du PATH d'un utilisateur Debian** : `kernelcustom_manager.py` (`extend_path()`) l'ajoute au démarrage. Sans cela, tous les modules apparaissent « non signés ».

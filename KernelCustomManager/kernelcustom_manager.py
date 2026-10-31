@@ -122,8 +122,20 @@ class KernelCustomApplication(Adw.Application):
             GLib.VariantType("(u)"), Gio.DBusCallFlags.NONE, -1, None, on_done)
 
 
+def extend_path():
+    """
+    Sous Debian, le PATH d'un utilisateur ne contient pas /usr/sbin, où se trouvent
+    modinfo et lsmod (utilisables sans root). Sans cela, ils sont introuvables et
+    tous les modules sont considérés comme non signés.
+    """
+    current = os.environ.get("PATH", "").split(os.pathsep)
+    missing = [d for d in ("/usr/sbin", "/sbin") if d not in current]
+    os.environ["PATH"] = os.pathsep.join([p for p in current if p] + missing)
+
+
 def main():
     """Point d'entrée principal"""
+    extend_path()
     # Migration de ~/KernelCustomManager/build AVANT que les gestionnaires
     # ne créent leurs dossiers dans le nouveau dossier de travail
     migration_message = paths.migrate_legacy_data()
