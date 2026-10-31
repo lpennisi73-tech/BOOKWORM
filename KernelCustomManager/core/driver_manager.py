@@ -17,6 +17,7 @@ import os
 import platform
 
 from utils import paths
+from utils.i18n import _ as tr  # « _ » sert de variable jetable dans ce module
 from utils.pkexec_helper import PkexecHelper
 
 
@@ -99,7 +100,7 @@ class DriverManager:
 
         # Extraire le nom du modèle
         model_match = re.search(r':\s+(.+?)\s+\[', line)
-        model = model_match.group(1) if model_match else "Unknown Model"
+        model = model_match.group(1) if model_match else tr("drivers.msg.unknown_model")
 
         return {
             'vendor': vendor,
@@ -272,7 +273,7 @@ class DriverManager:
                         source = "repository"
 
                     return {
-                        'name': 'NVIDIA Proprietary',
+                        'name': tr('drivers.msg.name_nvidia_proprietary'),
                         'version': version,
                         'source': source
                     }
@@ -282,15 +283,15 @@ class DriverManager:
                 # Sinon driver nvidia chargé mais pas nvidia-smi
                 return {
                     'name': 'NVIDIA',
-                    'version': 'Unknown',
+                    'version': tr('drivers.msg.unknown'),
                     'source': 'unknown'
                 }
 
             # Vérifier nouveau (open source)
             elif 'nouveau' in result.stdout:
                 return {
-                    'name': 'Nouveau (Open Source)',
-                    'version': 'Kernel Module',
+                    'name': tr('drivers.msg.name_nouveau'),
+                    'version': tr('drivers.msg.kernel_module'),
                     'source': 'opensource'
                 }
 
@@ -312,14 +313,14 @@ class DriverManager:
             if 'amdgpu' in result.stdout:
                 return {
                     'name': 'AMDGPU (Mesa)',
-                    'version': 'Open Source',
+                    'version': tr('drivers.msg.open_source'),
                     'source': 'opensource'
                 }
 
             elif 'radeon' in result.stdout:
                 return {
-                    'name': 'Radeon (Legacy)',
-                    'version': 'Open Source',
+                    'name': tr('drivers.msg.name_radeon'),
+                    'version': tr('drivers.msg.open_source'),
                     'source': 'opensource'
                 }
 
@@ -342,15 +343,15 @@ class DriverManager:
             if 'xe' in result.stdout:
                 # Nouveau driver xe (pour Arc et futures générations)
                 return {
-                    'name': 'Intel Xe (Modern)',
-                    'version': 'Kernel Module',
+                    'name': tr('drivers.msg.name_intel_xe'),
+                    'version': tr('drivers.msg.kernel_module'),
                     'source': 'opensource'
                 }
             elif 'i915' in result.stdout:
                 # Driver i915 classique
                 return {
                     'name': 'Intel i915',
-                    'version': 'Kernel Module',
+                    'version': tr('drivers.msg.kernel_module'),
                     'source': 'opensource'
                 }
 
@@ -428,8 +429,8 @@ class DriverManager:
         plus les branches Tesla (nvidia-tesla-XXX-driver)
         """
         catalog = [
-            ('nvidia-driver', 'NVIDIA driver metapackage (Debian non-free)', True),
-            ('nvidia-open-kernel-dkms', 'NVIDIA open GPU kernel modules (Turing+, DKMS)', False),
+            ('nvidia-driver', tr('drivers.desc.nvidia_driver'), True),
+            ('nvidia-open-kernel-dkms', tr('drivers.desc.nvidia_open'), False),
         ]
 
         # Branches Tesla disponibles (nvidia-tesla-535-driver, ...)
@@ -444,7 +445,7 @@ class DriverManager:
                 (line.split(' - ')[0].strip() for line in result.stdout.splitlines() if ' - ' in line),
                 reverse=True
             )
-            catalog += [(name, 'NVIDIA Tesla/datacenter driver branch', False) for name in tesla]
+            catalog += [(name, tr('drivers.desc.nvidia_tesla'), False) for name in tesla]
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
@@ -453,22 +454,22 @@ class DriverManager:
     def _get_amd_from_repos(self):
         """Liste drivers AMD depuis les dépôts Debian (Mesa + firmware non-free-firmware)"""
         return self._list_repo_drivers([
-            ('firmware-amd-graphics', 'AMD GPU firmware (required by amdgpu)', True),
-            ('mesa-vulkan-drivers', 'Mesa Vulkan drivers (RADV)', True),
-            ('libgl1-mesa-dri', 'Mesa DRI OpenGL drivers', True),
-            ('mesa-va-drivers', 'Mesa VA-API drivers (video acceleration)', False),
-            ('xserver-xorg-video-amdgpu', 'X.Org AMDGPU display driver (X11 only)', False),
+            ('firmware-amd-graphics', tr('drivers.desc.amd_firmware'), True),
+            ('mesa-vulkan-drivers', tr('drivers.desc.mesa_vulkan_radv'), True),
+            ('libgl1-mesa-dri', tr('drivers.desc.mesa_dri'), True),
+            ('mesa-va-drivers', tr('drivers.desc.mesa_va'), False),
+            ('xserver-xorg-video-amdgpu', tr('drivers.desc.xorg_amdgpu'), False),
         ])
 
     def _get_intel_from_repos(self):
         """Liste drivers Intel depuis les dépôts Debian (Mesa + VA-API + firmware)"""
         return self._list_repo_drivers([
-            ('firmware-intel-graphics', 'Intel GPU firmware (GuC/HuC/DMC)', True),
-            ('mesa-vulkan-drivers', 'Mesa Vulkan drivers (ANV)', True),
-            ('intel-media-va-driver', 'VA-API driver for Intel (hardware acceleration)', True),
-            ('intel-media-va-driver-non-free', 'VA-API driver for Intel with non-free encoders', False),
-            ('xserver-xorg-video-intel', 'X.Org Intel display driver (legacy)', False),
-            ('intel-gpu-tools', 'Tools for debugging Intel graphics', False),
+            ('firmware-intel-graphics', tr('drivers.desc.intel_firmware'), True),
+            ('mesa-vulkan-drivers', tr('drivers.desc.mesa_vulkan_anv'), True),
+            ('intel-media-va-driver', tr('drivers.desc.intel_va'), True),
+            ('intel-media-va-driver-non-free', tr('drivers.desc.intel_va_nonfree'), False),
+            ('xserver-xorg-video-intel', tr('drivers.desc.xorg_intel'), False),
+            ('intel-gpu-tools', tr('drivers.desc.intel_gpu_tools'), False),
         ])
 
     def get_official_driver_info(self, vendor):
@@ -511,16 +512,16 @@ class DriverManager:
         Retourne: (success: bool, message: str)
         """
         if progress_callback:
-            progress_callback(f"Installation de {package_name}...", 0.3)
+            progress_callback(tr("drivers.msg.installing", package=package_name), 0.3)
 
         success, _, error = PkexecHelper.apt_install(package_name, update=True)
 
         if not success:
-            return (False, f"Erreur d'installation: {error}")
+            return (False, tr("drivers.msg.install_error", error=error))
 
         if progress_callback:
-            progress_callback("Installation terminée", 1.0)
-        return (True, f"Driver {package_name} installé avec succès")
+            progress_callback(tr("drivers.msg.install_done"), 1.0)
+        return (True, tr("drivers.msg.installed", package=package_name))
 
     def download_official_driver(self, url, filename, progress_callback=None):
         """
@@ -532,28 +533,28 @@ class DriverManager:
 
         try:
             if progress_callback:
-                progress_callback(f"Téléchargement de {filename}...", 0.1)
+                progress_callback(tr("drivers.msg.downloading", file=filename), 0.1)
 
             def reporthook(block_num, block_size, total_size):
                 if progress_callback and total_size > 0:
                     downloaded = block_num * block_size
                     percent = min(downloaded / total_size, 1.0)
                     progress_callback(
-                        f"Téléchargement: {int(percent*100)}%",
+                        tr("drivers.msg.download_progress", percent=int(percent * 100)),
                         0.1 + (percent * 0.8)  # 10% à 90%
                     )
 
             urllib.request.urlretrieve(url, download_path, reporthook)
 
             if progress_callback:
-                progress_callback("Téléchargement terminé", 0.95)
+                progress_callback(tr("drivers.msg.download_done"), 0.95)
 
-            return (True, download_path, "Téléchargement réussi")
+            return (True, download_path, tr("drivers.msg.download_ok"))
 
         except (urllib.error.URLError, Exception) as e:
             if download_path.exists():
                 download_path.unlink()
-            return (False, None, f"Erreur de téléchargement: {str(e)}")
+            return (False, None, tr("drivers.msg.download_error", error=e))
 
     def _installed_nvidia_packages(self):
         """Paquets NVIDIA installés (nvidia-*, libnvidia-*, firmware-nvidia-*, ...)"""
@@ -578,25 +579,25 @@ class DriverManager:
         Retourne: (success: bool, message: str)
         """
         if vendor != 'NVIDIA':
-            return (False, "Fabricant non supporté")
+            return (False, tr("drivers.msg.vendor_unsupported"))
 
         if progress_callback:
-            progress_callback("Suppression du driver NVIDIA...", 0.3)
+            progress_callback(tr("drivers.msg.removing_nvidia"), 0.3)
 
         # Driver installé depuis les dépôts
         packages = self._installed_nvidia_packages()
         if packages:
             success, _, error = PkexecHelper.remove_packages(*packages, autoremove=False)
             if not success:
-                return (False, f"Erreur de suppression: {error}")
+                return (False, tr("drivers.msg.remove_error", error=error))
 
         # Driver installé via le .run officiel
         if Path("/usr/bin/nvidia-uninstall").exists():
             success, _, error = PkexecHelper.nvidia("uninstall")
             if not success:
-                return (False, f"Erreur nvidia-uninstall: {error}")
+                return (False, tr("drivers.msg.nvidia_uninstall_error", error=error))
 
-        return (True, "Driver NVIDIA supprimé. Un redémarrage est recommandé.")
+        return (True, tr("drivers.msg.nvidia_removed"))
 
     def scrape_nvidia_latest_version(self, progress_callback=None):
         """
@@ -605,7 +606,7 @@ class DriverManager:
         """
         try:
             if progress_callback:
-                progress_callback("Récupération des dernières versions NVIDIA...", 0.2)
+                progress_callback(tr("drivers.msg.fetching_nvidia"), 0.2)
 
             # URL pour la dernière version stable
             url = "https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt"
@@ -627,7 +628,7 @@ class DriverManager:
 
         except Exception as e:
             if progress_callback:
-                progress_callback(f"Erreur de scraping: {str(e)}", 0.0)
+                progress_callback(tr("drivers.msg.fetch_error", error=e), 0.0)
 
         return None
 
@@ -638,11 +639,11 @@ class DriverManager:
         """
         try:
             if progress_callback:
-                progress_callback("Création de la sauvegarde...", 0.2)
+                progress_callback(tr("drivers.msg.creating_backup"), 0.2)
 
             current_driver = self.get_current_driver(vendor)
             if not current_driver:
-                return (False, None, "Aucun driver à sauvegarder")
+                return (False, None, tr("drivers.msg.nothing_to_backup"))
 
             # Créer un ID unique pour la sauvegarde
             backup_id = f"{vendor}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -695,12 +696,12 @@ class DriverManager:
                 json.dump(backup_info, f, indent=2)
 
             if progress_callback:
-                progress_callback("Sauvegarde créée", 1.0)
+                progress_callback(tr("drivers.msg.backup_created"), 1.0)
 
-            return (True, backup_id, f"Sauvegarde créée: {backup_id}")
+            return (True, backup_id, tr("drivers.msg.backup_created_id", id=backup_id))
 
         except Exception as e:
-            return (False, None, f"Erreur de sauvegarde: {str(e)}")
+            return (False, None, tr("drivers.msg.backup_error", error=e))
 
     def list_backups(self, vendor=None):
         """
@@ -745,7 +746,7 @@ class DriverManager:
             info_file = backup_path / 'backup_info.json'
 
             if not info_file.exists():
-                return (False, "Sauvegarde introuvable")
+                return (False, tr("drivers.msg.backup_not_found"))
 
             with open(info_file, 'r') as f:
                 backup_info = json.load(f)
@@ -754,7 +755,7 @@ class DriverManager:
             driver_info = backup_info.get('driver')
 
             if progress_callback:
-                progress_callback(f"Restauration du driver {vendor}...", 0.3)
+                progress_callback(tr("drivers.msg.restoring", vendor=vendor), 0.3)
 
             # Pour l'instant, rollback = suppression du driver actuel
             # Le système reviendra au driver open source
@@ -772,12 +773,12 @@ class DriverManager:
                     details={'backup_id': backup_id}
                 )
 
-                return (True, f"Rollback réussi. Driver supprimé, le système utilisera le driver open source.")
+                return (True, tr("drivers.msg.rollback_ok"))
 
-            return (False, f"Échec du rollback: {message}")
+            return (False, tr("drivers.msg.rollback_failed", error=message))
 
         except Exception as e:
-            return (False, f"Erreur de rollback: {str(e)}")
+            return (False, tr("drivers.msg.rollback_error", error=e))
 
     # ==========================================
     # INSTALLATION NVIDIA INTELLIGENTE (Wayland/X11)
@@ -791,28 +792,28 @@ class DriverManager:
         """
         try:
             if progress_callback:
-                progress_callback("Analyse de l'environnement...", 0.1)
+                progress_callback(tr("drivers.msg.analyzing_env"), 0.1)
 
             # Détecter le display server
             if self.display_server in ['X11', 'Wayland']:
                 # Besoin d'arrêter le serveur graphique
                 if progress_callback:
-                    progress_callback("Installation nécessite arrêt du serveur graphique...", 0.2)
+                    progress_callback(tr("drivers.msg.needs_display_stop"), 0.2)
 
                 return self._install_nvidia_with_systemd(run_file_path, progress_callback)
 
             elif self.display_server == 'TTY':
                 # Déjà en TTY, installation directe possible
                 if progress_callback:
-                    progress_callback("Installation directe en mode TTY...", 0.3)
+                    progress_callback(tr("drivers.msg.direct_tty"), 0.3)
 
                 return self._install_nvidia_direct(run_file_path, progress_callback)
 
             else:
-                return (False, "Environnement d'affichage non détecté")
+                return (False, tr("drivers.msg.no_display_env"))
 
         except Exception as e:
-            return (False, f"Erreur d'installation: {str(e)}")
+            return (False, tr("drivers.msg.install_error", error=e))
 
     def _install_nvidia_with_systemd(self, run_file_path, progress_callback=None):
         """
@@ -821,22 +822,22 @@ class DriverManager:
         """
         success, _, error = PkexecHelper.nvidia("schedule", run_file_path)
         if not success:
-            return (False, f"Erreur de création du service: {error}")
+            return (False, tr("drivers.msg.service_error", error=error))
 
         if progress_callback:
-            progress_callback("Service créé", 1.0)
+            progress_callback(tr("drivers.msg.service_created"), 1.0)
 
-        return (True, "Installation programmée au prochain redémarrage.\n\n⚠️ Le système va redémarrer et installer le driver NVIDIA automatiquement.\n\nVoulez-vous redémarrer maintenant ?")
+        return (True, tr("drivers.msg.scheduled"))
 
     def _install_nvidia_direct(self, run_file_path, progress_callback=None):
         """Installation NVIDIA directe (déjà en mode TTY)"""
         if progress_callback:
-            progress_callback("Installation en cours...", 0.5)
+            progress_callback(tr("drivers.msg.installing_now"), 0.5)
 
         success, _, error = PkexecHelper.nvidia("run", run_file_path, timeout=900)
         if not success:
-            return (False, f"Erreur d'installation: {error}")
+            return (False, tr("drivers.msg.install_error", error=error))
 
         if progress_callback:
-            progress_callback("Installation terminée", 1.0)
-        return (True, "Driver NVIDIA installé avec succès. Un redémarrage est recommandé.")
+            progress_callback(tr("drivers.msg.install_done"), 1.0)
+        return (True, tr("drivers.msg.nvidia_installed"))
