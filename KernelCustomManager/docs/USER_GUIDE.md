@@ -322,20 +322,33 @@ Compile custom Linux kernels with your own configuration.
 
 **Steps:**
 1. Go to **"Compile"** tab
-2. Enter kernel version in the field (e.g., `6.11.1`)
+2. Pick a version in the **Branch** list, or type one in the version field (e.g., `7.3.3`)
 3. Click **"📥 Download"**
-4. Progress dialog appears showing download status
-5. Click the **🔄** button to check for latest stable version
+4. Progress dialog appears showing download status (it can be cancelled at any time)
+5. Click the **🔄** button to check for the latest version of the selected branch
 
-**Version formats:**
-- Stable: `6.11.1`, `6.10.5`
-- Latest: Click 🔄 button to auto-fill
-- RC versions: `6.12-rc3` (release candidates)
+**Branches** (read from kernel.org when the application starts):
+- **Stable**: latest released kernel, recommended for most users
+- **Mainline**: release candidates (`7.4-rc2`), meant for testing. Out-of-tree
+  modules (DKMS, NVIDIA) may fail to build on them
+- **Longterm (LTS)**: older series maintained for several years
+- Series marked *end of life* no longer receive fixes
+
+The version field always wins: you can type any published version
+(`6.17.5`, `7.4-rc1`) even if it is not in the list.
 
 **What's downloaded:**
-- Source code tarball from kernel.org
-- Extracted to: `~/.local/share/kernelcustom-manager/linux-X.X.X/`
+- Source code tarball from kernel.org (no other server is accepted)
+- Stable and longterm archives are checked against the SHA-256 checksums published
+  by kernel.org; a mismatching archive is deleted. Release candidates have no
+  published checksum
+- Extracted to: `~/.local/share/kernelcustom-manager/sources/linux-X.X.X/`, which
+  becomes the active tree
 - Size: ~1-2 GB
+
+**If the sources are already present**, the application offers to use them as they
+are or to download them again. Downloading again replaces the tree: the `.config`
+is kept, built objects and local changes are lost.
 
 ---
 

@@ -24,7 +24,8 @@
 L'interface est organisée en 9 onglets : **Kernels installés**, **Paquets locaux**, **Compiler**, **Pilotes GPU**, **SecureBoot**, **Sources système**, **Profils**, **Historique** et **Nettoyage**.
 
 ### 🔩 **Gestion des Kernels**
-- Téléchargement des sources depuis kernel.org (dernière version stable proposée)
+- Téléchargement des sources depuis kernel.org : choix de la branche **stable**, **mainline** (pré-versions `-rc`) ou **longterm** (LTS), ou saisie d'une version précise
+- Vérification SHA-256 des archives stable et longterm (`sha256sums.asc` de kernel.org)
 - Configuration à partir de la config du système ou d'un fichier, puis `make nconfig` (optionnel)
 - Compilation multi-threadée dans un terminal, en paquets `.deb` (`make bindeb-pkg`), avec notification de fin
 - Gestion des kernels installés (liste, suppression ; le kernel en cours d'exécution est protégé)
@@ -138,7 +139,7 @@ kernelcustom-manager
 
 ```bash
 # 1. Aller dans l'onglet "Compiler"
-# 2. Entrer une version (ex: 7.3.1)
+# 2. Choisir une branche dans la liste (stable, mainline, longterm) ou entrer une version (ex: 7.3.1, 7.4-rc2)
 # 3. Cliquer "📥 Télécharger"
 # 4. Cliquer "⚙️ Configurer" (choisir config système)
 # 5. Cliquer "🔨 Compiler le kernel" : la compilation s'ouvre dans un terminal

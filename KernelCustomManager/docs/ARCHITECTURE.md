@@ -49,6 +49,7 @@ KernelCustomManager/
 ├── bin/kernelcustom-manager     # Launcher installed in /usr/bin
 ├── core/                        # Business logic, no GTK
 │   ├── kernel_manager.py        # Kernels, packages, profiles, configs, history, download
+│   ├── kernel_releases.py       # Versions published on kernel.org (stable, mainline, longterm)
 │   ├── build_runner.py          # Standalone script run in a terminal (compile, nconfig)
 │   ├── sources_manager.py       # /usr/src sources and headers
 │   ├── driver_manager.py        # GPU detection and drivers (Debian repositories, NVIDIA .run)

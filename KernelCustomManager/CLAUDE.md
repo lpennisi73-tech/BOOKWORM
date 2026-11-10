@@ -54,6 +54,19 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - **Migration** (`paths.migrate_legacy_data()`) : appelée dans `main()` **avant** l'import de `gui.main_window`. Elle déplace l'ancien dossier, réécrit les liens absolus internes (profondeur 2) et laisse un lien de compatibilité si des liens de `/usr/src` pointent vers l'ancien emplacement. Elle ne fait rien si le nouveau dossier est déjà rempli. Un message est affiché une fois.
 - Pour tester sans toucher à ses données : `KCM_DATA_DIR=/tmp/x python3 kernelcustom_manager.py` ou `HOME=/tmp/fakehome …`.
 
+## Versions et téléchargement des sources (v3.1)
+
+- `core/kernel_releases.py` (sans GTK) lit `https://www.kernel.org/releases.json` une fois par session (`get_releases()`, `refresh=True` pour relire). Branches proposées : `stable`, `mainline`, `longterm` (`linux-next` n'a pas d'archive). Appels réseau bloquants : `run_task`.
+- Versions acceptées : `X.Y`, `X.Y.Z`, `X.Y-rcN` (`VERSION_RE`). Une version de la liste utilise l'URL donnée par kernel.org ; une version saisie utilise `source_url()` (CDN en `.tar.xz`, ou `git.kernel.org/torvalds/t/` en `.tar.gz` pour les `-rc`).
+- **Seuls `cdn.kernel.org`, `git.kernel.org` et `kernel.org` sont acceptés** (`is_allowed_url`, revérifié après redirection).
+- `KernelManager.download_kernel(version, url, progress, cancelled, replace)` lève `DownloadCancelled` ou `DownloadError` (message traduit). `progress(fraction, message)` avec `fraction=None` quand la durée est inconnue (git.kernel.org n'annonce pas la taille).
+- Intégrité : SHA-256 comparé à `sha256sums.asc` du CDN (HTTPS, signature PGP non vérifiée). Écart ou somme indisponible = échec. Rien pour les `-rc` (aucune somme publiée).
+- L'archive est extraite dans `sources/.extract-linux-<v>` puis renommée : jamais d'arbre incomplet. `replace=True` remplace un arbre existant en gardant son `.config`.
+- Lien `linux` : toujours passer par `activate_sources()` / `active_version()` (un lien cassé se teste avec `is_symlink()`, pas `exists()`).
+- `KernelManager.tree_version()` lit la version dans le `Makefile` de l'arbre (`linux-7.4-rc2` → `7.4.0-rc2`) : à utiliser pour l'historique et les noms de sauvegarde, pas le nom du dossier.
+- git.kernel.org refuse le `User-Agent` par défaut de Python (403) : garder l'en-tête `kernelcustom-manager`. Il peut aussi répondre 200 avec un contenu vide (observé le 2026-11-10) : l'app affiche alors « archive vide ».
+- La compression des modules n'est désactivée dans le `.config` que si la signature à la compilation est cochée (`disable_module_compression`).
+
 ## Compilation et terminaux (étape 4)
 
 - `utils/terminal.py` `launch_in_terminal(argv)` est le **seul** moyen d'ouvrir un terminal. La commande est une liste d'arguments (ptyxis, gnome-terminal, kgx, konsole, xfce4-terminal, xterm).
@@ -104,6 +117,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - **Dialogues : `utils/dialogs.py` (`main_window.dialogs`), tous asynchrones**. Le code qui suit une réponse est passé en callback :
   - `show_info` / `show_warning` / `show_error(title, message, on_close=None)`, `toast(message)` pour les confirmations discrètes ;
   - `ask(title, message, on_yes, on_no=None, destructive=False, yes_label=, no_label=)`. **Il n'y a plus de `show_question()`** ;
+  - `choose(title, message, choices, on_choice)` : plusieurs réponses `[(id, libellé, style)]` + Annuler ;
   - `form(title, child, ok_label, on_ok)` (Adw.AlertDialog + formulaire) et `window(title, child, ok_label, on_ok)` (Adw.Dialog). Pour `window`, `on_ok()` renvoie True pour fermer ;
   - `progress(title, status, cancellable=False)` → `ProgressDialog` dont `set_status`, `set_fraction`, `pulse`, `close` et `.cancelled` sont **utilisables depuis un thread** ;
   - `open_file(title, on_selected, filters)`, `save_file(title, on_selected, initial_name)` (`Gtk.FileDialog`).
