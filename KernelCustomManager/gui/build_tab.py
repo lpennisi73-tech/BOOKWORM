@@ -2,22 +2,90 @@
 Onglet de compilation et configuration
 """
 
-import json
-import re
-import urllib.request
-
 from gi.repository import Gtk
 
+from core import kernel_releases
+from core.kernel_manager import DownloadCancelled
 from gui.widgets import button, entry, markup_label, page_box, section, title_label
 from utils.dialogs import run_task
 from utils.i18n import get_i18n
 
-# Version publiée sur kernel.org : 6.17, 6.16.9 (pas de -rc : autre dossier sur le CDN)
-KERNEL_VERSION_RE = re.compile(r'^\d+\.\d+(\.\d+)?$')
 
+class ReleasePicker:
+    """
+    Choix de la version à télécharger : liste des versions publiées sur kernel.org
+    (stable, mainline, longterm) + champ libre pour une version précise.
+    La liste remplit le champ ; c'est toujours le champ qui est téléchargé.
+    """
 
-class DownloadCancelled(Exception):
-    pass
+    def __init__(self, on_activate):
+        i18n = get_i18n()
+        self.releases = []
+        self._filling = False
+
+        self.dropdown = Gtk.DropDown(model=Gtk.StringList.new([i18n._("build.releases_loading")]),
+                                     hexpand=True, sensitive=False)
+        self.dropdown.connect("notify::selected", self._on_selected)
+        self.entry = entry(placeholder="7.3.3")
+        self.entry.set_hexpand(True)
+        self.entry.connect("activate", lambda _e: on_activate())
+        self.entry.connect("changed", lambda _e: self._update_hint())
+        self.hint = markup_label()
+        self.hint.add_css_class("dim-label")
+        self.hint.add_css_class("caption")
+        self.hint.set_visible(False)
+
+    def version(self):
+        return self.entry.get_text().strip()
+
+    def selected(self):
+        """KernelRelease choisie dans la liste (None si la liste est vide)"""
+        index = self.dropdown.get_selected()
+        return self.releases[index] if index < len(self.releases) else None
+
+    def set_releases(self, releases, select=None):
+        """Remplit la liste. select : KernelRelease à sélectionner (défaut : la première)"""
+        i18n = get_i18n()
+        self._filling = True
+        self.releases = list(releases)
+        labels = [self._label(r) for r in self.releases] or [i18n._("build.releases_unavailable")]
+        self.dropdown.set_model(Gtk.StringList.new(labels))
+        self.dropdown.set_sensitive(bool(self.releases))
+        if select in self.releases:
+            self.dropdown.set_selected(self.releases.index(select))
+        self._filling = False
+        chosen = self.selected()
+        if chosen and (select is not None or not self.version()):
+            self.entry.set_text(chosen.version)
+        self._update_hint()
+
+    @staticmethod
+    def _label(release):
+        i18n = get_i18n()
+        label = f"{i18n._('build.branch.' + release.branch)} — {release.version}"
+        return f"{label} ({i18n._('build.eol')})" if release.eol else label
+
+    def _on_selected(self, *_args):
+        chosen = self.selected()
+        if chosen and not self._filling:
+            self.entry.set_text(chosen.version)
+
+    def _update_hint(self):
+        """Avertissement sous le champ : pré-version, fin de vie, ou branche et date"""
+        i18n = get_i18n()
+        version = self.version()
+        release = kernel_releases.find_release(self.releases, version)
+        if kernel_releases.is_prerelease(version) and kernel_releases.is_valid_version(version):
+            text = f"⚠️ {i18n._('build.hint_prerelease')}"
+        elif release and release.eol:
+            text = f"⚠️ {i18n._('build.hint_eol')}"
+        elif release:
+            text = i18n._("build.hint_release", branch=i18n._("build.branch." + release.branch),
+                          date=release.date)
+        else:
+            text = ""
+        self.hint.set_text(text)
+        self.hint.set_visible(bool(text))
 
 
 def create_build_tab(main_window):
@@ -27,16 +95,23 @@ def create_build_tab(main_window):
 
     # === TÉLÉCHARGEMENT ===
     download, download_inner = section(i18n._("button.download"))
+    picker = ReleasePicker(lambda: download_kernel(main_window))
+    main_window.release_picker = picker
+    main_window.version_entry = picker.entry
+
+    branch_row = Gtk.Box(spacing=8)
+    branch_row.append(Gtk.Label(label=i18n._("build.branch_label")))
+    branch_row.append(picker.dropdown)
+    branch_row.append(button(i18n._("button.update"), lambda: auto_update_kernel(main_window),
+                             tooltip=i18n._("tooltip.update_branch")))
+    download_inner.append(branch_row)
+
     row = Gtk.Box(spacing=8)
     row.append(Gtk.Label(label=i18n._("build.version_label")))
-    main_window.version_entry = entry(placeholder="6.17.5")
-    main_window.version_entry.set_hexpand(True)
-    main_window.version_entry.connect("activate", lambda _e: download_kernel(main_window))
-    row.append(main_window.version_entry)
+    row.append(picker.entry)
     row.append(button(i18n._("button.download"), lambda: download_kernel(main_window), "suggested-action"))
-    row.append(button(i18n._("button.update"), lambda: auto_update_kernel(main_window),
-                      tooltip=i18n._("tooltip.update_stable")))
     download_inner.append(row)
+    download_inner.append(picker.hint)
     box.append(download)
 
     # === CONFIGURATION ===
@@ -60,11 +135,8 @@ def create_build_tab(main_window):
 
     update_source_label(main_window)
 
-    # Version stable de kernel.org en arrière-plan (réseau : ne pas bloquer le démarrage)
-    def set_stable(version):
-        if version and not main_window.version_entry.get_text():
-            main_window.version_entry.set_text(version)
-    run_task(get_stable_kernel_version, set_stable)
+    # Versions de kernel.org en arrière-plan (réseau : ne pas bloquer le démarrage)
+    run_task(kernel_releases.get_releases, picker.set_releases)
 
     scrolled = Gtk.ScrolledWindow(child=box, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
     return scrolled
@@ -83,84 +155,112 @@ def update_source_label(main_window):
         main_window.build_source_label.set_markup(f"<i>{i18n._('message.error.no_kernel_source')}</i>")
 
 
-def get_stable_kernel_version():
-    """Récupère la version stable depuis kernel.org (None en cas d'échec)"""
-    try:
-        with urllib.request.urlopen("https://www.kernel.org/releases.json", timeout=5) as response:
-            data = json.loads(response.read().decode())
-        for release in data.get('releases', []):
-            if release.get('moniker') == 'stable':
-                return release.get('version')
-    except Exception:
-        pass
-    return None
-
-
-def download_kernel(main_window):
-    """Télécharge et extrait les sources du kernel"""
+def download_kernel(main_window, replace=False):
+    """Télécharge et extrait les sources de la version saisie"""
     i18n = get_i18n()
-    version = main_window.version_entry.get_text().strip()
+    manager = main_window.kernel_manager
+    picker = main_window.release_picker
+    version = picker.version()
 
     if not version:
         main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.enter_version"))
         return
-    if not KERNEL_VERSION_RE.match(version):
+    if not kernel_releases.is_valid_version(version):
         main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.invalid_version"))
         return
 
+    # Sources déjà présentes : les réutiliser, ou les remplacer explicitement
+    if not replace and manager.source_tree(version):
+        _ask_existing_sources(main_window, version)
+        return
+
+    # Version de la liste : URL donnée par kernel.org. Sinon elle est déduite de la version
+    release = kernel_releases.find_release(picker.releases, version)
     progress = main_window.dialogs.progress(i18n._("dialog.download.title"),
                                             i18n._("dialog.download.status", version=version),
                                             cancellable=True)
 
-    def on_progress(percent, message=None):
-        if progress.cancelled:
-            raise DownloadCancelled()  # interrompt urlretrieve
-        progress.set_fraction(percent / 100.0)
+    def on_progress(fraction, message=None):
         if message:
             progress.set_status(message)
+        if fraction is None:
+            progress.pulse()
+        else:
+            progress.set_fraction(fraction)
 
-    def done(success):
+    def done(_result):
         progress.close()
         update_source_label(main_window)
-        if progress.cancelled:
-            main_window.dialogs.toast(i18n._("message.info.cancelled"))
-        elif success:
-            main_window.dialogs.show_info(i18n._("message.success.title"),
-                                          i18n._("message.success.kernel_downloaded", version=version))
-        else:
-            main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.download_failed"))
+        main_window.dialogs.show_info(i18n._("message.success.title"),
+                                      i18n._("message.success.kernel_downloaded", version=version))
 
     def failed(error):
         progress.close()
-        main_window.dialogs.show_error(i18n._("message.error.title"), str(error))
+        update_source_label(main_window)
+        if isinstance(error, DownloadCancelled):
+            main_window.dialogs.toast(i18n._("message.info.cancelled"))
+        else:
+            main_window.dialogs.show_error(i18n._("message.error.download_failed"), str(error))
 
-    run_task(lambda: main_window.kernel_manager.download_kernel(version, on_progress), done, failed)
+    run_task(lambda: manager.download_kernel(version, release.source if release else None, on_progress,
+                                             lambda: progress.cancelled, replace),
+             done, failed)
+
+
+def _ask_existing_sources(main_window, version):
+    """Les sources linux-<version> existent déjà : activer l'arbre ou le re-télécharger"""
+    i18n = get_i18n()
+    manager = main_window.kernel_manager
+    active = manager.active_version() == version
+
+    def on_choice(choice):
+        if choice == "redownload":
+            download_kernel(main_window, replace=True)
+            return
+        try:
+            manager.activate_sources(version)
+        except Exception as e:
+            main_window.dialogs.show_error(i18n._("message.error.title"), str(e))
+            return
+        update_source_label(main_window)
+        main_window.dialogs.toast(i18n._("message.success.sources_activated", version=version))
+
+    choices = [("redownload", i18n._("button.redownload"), "destructive")]
+    if not active:
+        choices.append(("activate", i18n._("button.use_existing"), "suggested"))
+    main_window.dialogs.choose(
+        i18n._("message.confirm.title"),
+        i18n._("message.confirm.sources_exist_active" if active else "message.confirm.sources_exist",
+               version=version),
+        choices, on_choice)
 
 
 def auto_update_kernel(main_window):
-    """Mise à jour vers la version stable de kernel.org"""
+    """Recherche la dernière version de la branche choisie dans la liste"""
     i18n = get_i18n()
+    picker = main_window.release_picker
+    current = picker.selected()
 
-    def check(stable):
-        if not stable:
+    def check(releases):
+        if not releases:
             main_window.dialogs.show_error(i18n._("message.error.title"),
-                                           i18n._("message.error.stable_version_failed"))
+                                           i18n._("message.error.releases_failed"))
             return
 
-        linux_dir = main_window.kernel_manager.base_dir / "linux"
-        if linux_dir.exists() and linux_dir.resolve().name == f"linux-{stable}":
+        latest = (kernel_releases.latest_for(releases, current) if current else None) or releases[0]
+        picker.set_releases(releases, select=latest)
+
+        if main_window.kernel_manager.active_version() == latest.version:
             main_window.dialogs.show_info(i18n._("message.info.already_uptodate"),
-                                          i18n._("message.success.already_updated", version=stable))
+                                          i18n._("message.success.already_updated", version=latest.version))
             return
 
-        def update():
-            main_window.version_entry.set_text(stable)
-            download_kernel(main_window)
-
+        branch = i18n._("build.branch." + latest.branch)
         main_window.dialogs.ask(i18n._("message.confirm.title"),
-                                i18n._("message.confirm.update_available", version=stable), on_yes=update)
+                                i18n._("message.confirm.update_available", version=latest.version, branch=branch),
+                                on_yes=lambda: download_kernel(main_window))
 
-    run_task(get_stable_kernel_version, check)
+    run_task(lambda: kernel_releases.get_releases(refresh=True), check)
 
 
 def configure_kernel(main_window):

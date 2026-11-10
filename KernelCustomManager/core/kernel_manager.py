@@ -3,16 +3,24 @@ Module de gestion des kernels
 Logique métier pour télécharger, compiler, installer les kernels
 """
 
+import hashlib
+import json
 import logging
 import re
-import subprocess
 import shutil
+import subprocess
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime
 from pathlib import Path
 
+from core import kernel_releases
 from utils import paths
+from utils.i18n import _ as tr
 from utils.i18n import format_size
-from datetime import datetime
-import json
+
+log = logging.getLogger(__name__)
 
 
 # Nom de profil : lettres (accents compris), chiffres, espace, point, tiret, plus et
@@ -23,6 +31,14 @@ PROFILE_NAME_RE = re.compile(r'^[^\W_][\w .+-]{0,63}$')
 
 def is_valid_profile_name(name):
     return bool(PROFILE_NAME_RE.match(name)) and not name.endswith(" ")
+
+
+class DownloadError(Exception):
+    """Échec du téléchargement ou de l'extraction (message déjà traduit)"""
+
+
+class DownloadCancelled(Exception):
+    """Téléchargement interrompu par l'utilisateur"""
 
 
 class KernelManager:
@@ -243,42 +259,166 @@ class KernelManager:
             })
         return packages
     
-    def download_kernel(self, version, progress_callback=None):
-        """Télécharge les sources d'un kernel"""
-        major = version.split('.')[0]
-        archive = f"linux-{version}.tar.xz"
-        url = f"https://cdn.kernel.org/pub/linux/kernel/v{major}.x/{archive}"
-        dest = self.sources_dir / archive
-        
-        try:
-            import urllib.request
-            
-            def report_progress(block_num, block_size, total_size):
-                if progress_callback and total_size > 0:
-                    percent = min(int((block_num * block_size * 100) / total_size), 100)
-                    progress_callback(percent)
-            
-            urllib.request.urlretrieve(url, dest, reporthook=report_progress)
-            
-            if progress_callback:
-                progress_callback(90, "Extraction...")
-            
-            subprocess.run(
-                ["tar", "-xf", str(dest), "-C", str(self.sources_dir)],
-                check=True
-            )
-            
-            dest.unlink()
-            
-            linux_link = self.base_dir / "linux"
-            if linux_link.exists():
-                linux_link.unlink()
-            linux_link.symlink_to(self.sources_dir / f"linux-{version}")
-            
-            return True
-            
-        except Exception as e:
-            # Erreur ou annulation (le callback de progression lève une exception)
-            logging.warning(f"Téléchargement de linux-{version} interrompu : {e}")
-            dest.unlink(missing_ok=True)  # archive partielle
+    # ==================== Sources ====================
+
+    def source_tree(self, version):
+        """Dossier des sources linux-<version> du dossier de travail (None s'il n'existe pas)"""
+        tree = self.sources_dir / f"linux-{version}"
+        return tree if tree.is_dir() else None
+
+    def active_version(self):
+        """Version de l'arbre actif (cible du lien linux), None s'il n'y en a pas"""
+        link = self.base_dir / "linux"
+        if not link.is_dir():
+            return None
+        return link.resolve().name.removeprefix("linux-")
+
+    def activate_sources(self, version):
+        """Fait de linux-<version> l'arbre actif (lien linux). False si les sources sont absentes"""
+        tree = self.source_tree(version)
+        if tree is None:
             return False
+        link = self.base_dir / "linux"
+        # is_symlink() et non exists() : un lien cassé (arbre supprimé) doit être remplacé
+        if link.is_symlink():
+            link.unlink()
+        elif link.exists():
+            raise DownloadError(tr("download.error.link_not_symlink", path=link))
+        link.symlink_to(tree)
+        return True
+
+    def download_kernel(self, version, url=None, progress=None, cancelled=None, replace=False):
+        """
+        Télécharge et extrait les sources d'un kernel, puis en fait l'arbre actif.
+
+        url        : archive à télécharger (défaut : déduite de la version)
+        progress   : fonction (fraction, message) ; fraction None = durée inconnue
+        cancelled  : fonction sans argument, True pour interrompre
+        replace    : remplace un arbre linux-<version> existant (son .config est conservé)
+
+        Lève DownloadCancelled ou DownloadError (message traduit). L'archive est
+        extraite dans un dossier temporaire : un échec ne laisse aucun arbre incomplet.
+        """
+        if not kernel_releases.is_valid_version(version):
+            raise DownloadError(tr("message.error.invalid_version"))
+        url = url or kernel_releases.source_url(version)
+        if not kernel_releases.is_allowed_url(url):
+            raise DownloadError(tr("download.error.bad_url", url=url))
+
+        target = self.sources_dir / f"linux-{version}"
+        if target.exists() and not replace:
+            raise DownloadError(tr("download.error.exists", version=version))
+
+        archive = self.sources_dir / f"linux-{version}.tar.part"
+        staging = self.sources_dir / f".extract-linux-{version}"
+
+        def check():
+            if cancelled and cancelled():
+                raise DownloadCancelled()
+
+        def report(fraction, message=None):
+            if progress:
+                progress(fraction, message)
+
+        try:
+            shutil.rmtree(staging, ignore_errors=True)  # reste d'un téléchargement interrompu
+            self._fetch_archive(version, url, archive, report, check)
+
+            report(None, tr("download.extracting"))
+            staging.mkdir(parents=True)
+            self._extract_archive(archive, staging, check)
+            trees = [entry for entry in staging.iterdir() if entry.is_dir()]
+            if len(trees) != 1 or not (trees[0] / "Makefile").is_file():
+                raise DownloadError(tr("download.error.extract", error=tr("download.error.unexpected_content")))
+
+            check()  # dernier point d'annulation : la suite modifie l'arbre existant
+            config = None
+            if target.exists():
+                if (target / ".config").is_file():
+                    config = (target / ".config").read_bytes()
+                shutil.rmtree(target)
+            trees[0].rename(target)
+            if config is not None:
+                (target / ".config").write_bytes(config)
+
+            self.activate_sources(version)
+            log.info(f"Kernel sources linux-{version} downloaded from {url}")
+            return True
+        except DownloadCancelled:
+            log.info(f"Download of linux-{version} cancelled")
+            raise
+        except DownloadError as e:
+            log.warning(f"Download of linux-{version} failed: {e}")
+            raise
+        except OSError as e:
+            log.warning(f"Download of linux-{version} failed: {e}")
+            raise DownloadError(tr("download.error.io", error=e)) from e
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    @staticmethod
+    def _fetch_archive(version, url, dest, report, check):
+        """Télécharge url dans dest par blocs (annulable, même si la taille est inconnue)"""
+        request = urllib.request.Request(url, headers={"User-Agent": "kernelcustom-manager"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response, open(dest, "wb") as out:
+                # Après une éventuelle redirection, toujours sur kernel.org
+                if not kernel_releases.is_allowed_url(response.url):
+                    raise DownloadError(tr("download.error.bad_url", url=response.url))
+                total = int(response.headers.get("Content-Length") or 0)
+                received = 0
+                last_report = 0.0
+                while True:
+                    check()
+                    block = response.read(256 * 1024)
+                    if not block:
+                        break
+                    out.write(block)
+                    received += len(block)
+                    now = time.monotonic()
+                    if now - last_report >= 0.2:
+                        last_report = now
+                        if total:
+                            report(received / total)
+                        else:
+                            # git.kernel.org génère l'archive à la volée : taille inconnue
+                            report(None, tr("download.received", version=version, size=format_size(received)))
+                if received == 0:
+                    # Déjà observé sur git.kernel.org : réponse 200 sans contenu
+                    raise DownloadError(tr("download.error.empty"))
+                if total and received != total:
+                    raise DownloadError(tr("download.error.incomplete"))
+                if total:
+                    report(1.0)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise DownloadError(tr("download.error.not_found", version=version)) from e
+            raise DownloadError(tr("download.error.http", code=e.code, reason=e.reason)) from e
+        except urllib.error.URLError as e:
+            raise DownloadError(tr("download.error.network", error=e.reason)) from e
+        except TimeoutError as e:
+            raise DownloadError(tr("download.error.network", error=e)) from e
+
+    @staticmethod
+    def _extract_archive(archive, dest, check):
+        """tar -xf (xz ou gzip détecté par tar), interrompu si check() lève une exception"""
+        try:
+            process = subprocess.Popen(["tar", "-xf", str(archive), "-C", str(dest)],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        except FileNotFoundError as e:
+            raise DownloadError(tr("download.error.extract", error=e)) from e
+        while True:
+            try:
+                _, stderr = process.communicate(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                try:
+                    check()
+                except DownloadCancelled:
+                    process.kill()
+                    process.communicate()
+                    raise
+        if process.returncode != 0:
+            error = stderr.decode(errors="replace").strip().splitlines()[-1:] or [f"tar: {process.returncode}"]
+            raise DownloadError(tr("download.error.extract", error=error[0]))

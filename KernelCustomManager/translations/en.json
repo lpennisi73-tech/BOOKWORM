@@ -40,10 +40,12 @@
     "reboot_now": "Reboot Now",
     "yes": "Yes",
     "no": "No",
-    "replace": "Replace"
+    "replace": "Replace",
+    "redownload": "Download again",
+    "use_existing": "Use these sources"
   },
   "tooltip": {
-    "update_stable": "Update to the latest stable version"
+    "update_branch": "Check for the latest version of the selected branch"
   },
   "message": {
     "error": {
@@ -65,7 +67,6 @@
       "remove_failed": "Removal failed:\n{error}",
       "reboot_failed": "Cannot reboot:\n{error}",
       "install_failed": "Installation error",
-      "stable_version_failed": "Cannot retrieve stable version",
       "import_failed": "Import failed",
       "no_config_export": "No configuration to export",
       "export_failed": "Export failed",
@@ -75,7 +76,7 @@
       "profile_load_failed": "Cannot load profile",
       "profile_delete_failed": "Cannot delete:\n{error}",
       "select_version": "Please select a version",
-      "invalid_version": "Invalid version",
+      "invalid_version": "Invalid version\n\nExamples: 7.3.3, 6.18.62, 7.4-rc2",
       "invalid_suffix": "Invalid suffix: use only letters, digits and the characters . _ + ~ - (e.g. -kernelcustom)",
       "make_missing": "make not found: install build-essential (sudo apt install build-essential).",
       "invalid_profile_name": "The name \"{name}\" contains characters that are not allowed.\n\nAllowed characters: letters, digits, space, dot, hyphen (-), plus (+) and underscore (_). The name must start with a letter or a digit (64 characters at most).",
@@ -83,13 +84,14 @@
       "auth_cancelled": "Authentication cancelled",
       "auth_denied": "Authentication denied",
       "helper_failed": "Failed (code {code})",
-      "timeout": "Timed out"
+      "timeout": "Timed out",
+      "releases_failed": "Unable to read the versions from kernel.org"
     },
     "confirm": {
       "title": "Confirm",
       "delete_kernel": "The following packages will be removed:\n\n• {packages}\n\nThis action is irreversible!",
       "reboot": "Do you really want to reboot the system now?\n\nMake sure you have saved your work.",
-      "update_available": "New version: {version}\n\nDownload?",
+      "update_available": "New {branch} version: {version}\n\nDownload it?",
       "load_profile": "Load profile '{name}'?\n\nThe current configuration will be replaced.",
       "delete_profile": "Delete profile '{name}'?\n\nThis action is irreversible.",
       "clear_history": "Clear all compilation history?\n\nThis action is irreversible.",
@@ -97,7 +99,9 @@
       "copy_sources": "Copy kernel {version} sources to /usr/src/?\n\nThis will take ~1-2 GB of disk space.",
       "delete_sources": "Remove kernel {version} sources from /usr/src/?\n\nThis action is irreversible!",
       "unlink_sources": "Remove symbolic link for kernel {version} from /usr/src/?\n\nThis will only remove the link, not the sources.",
-      "overwrite_profile": "The profile \"{name}\" already exists.\n\nReplace it with the current configuration?"
+      "overwrite_profile": "The profile \"{name}\" already exists.\n\nReplace it with the current configuration?",
+      "sources_exist": "The kernel {version} sources are already present.\n\nYou can use them as they are, or download them again: the tree is then replaced (the .config is kept, built objects and local changes are lost).",
+      "sources_exist_active": "The kernel {version} sources are already present and active.\n\nDownloading them again replaces the tree: the .config is kept, built objects and local changes are lost."
     },
     "success": {
       "title": "Success",
@@ -119,7 +123,8 @@
       "sources_deleted": "Kernel {version} sources removed",
       "packages_installed": "Packages installed:\n\n• {packages}\n\n🔄 Reboot your system to use the new kernel.",
       "compilation_success": "Compilation successful!",
-      "compilation_success_notification": "Kernel {version}{suffix} compiled in {time}"
+      "compilation_success_notification": "Kernel {version}{suffix} compiled in {time}",
+      "sources_activated": "Sources {version} activated"
     },
     "info": {
       "title": "Installing:",
@@ -259,7 +264,19 @@
     "headers_missing": "Headers linux-headers-{version} not found: only the source links were created"
   },
   "build": {
-    "version_label": "Kernel version:"
+    "version_label": "Kernel version:",
+    "branch_label": "Branch:",
+    "branch": {
+      "stable": "Stable",
+      "mainline": "Mainline",
+      "longterm": "Longterm (LTS)"
+    },
+    "eol": "end of life",
+    "releases_loading": "Reading versions from kernel.org…",
+    "releases_unavailable": "kernel.org unreachable: type the version",
+    "hint_prerelease": "Pre-release (mainline): meant for testing. Out-of-tree modules (DKMS, NVIDIA) may fail to build. No checksum is published for this archive.",
+    "hint_eol": "This series is end of life: it no longer receives fixes.",
+    "hint_release": "{branch} · released on {date}"
   },
   "drivers": {
     "tab_installation": "Installation",
@@ -691,5 +708,22 @@
     "language": "Language",
     "about": "About",
     "quit": "Quit"
+  },
+  "download": {
+    "extracting": "Extracting sources…",
+    "received": "Downloading kernel {version}… {size}",
+    "error": {
+      "bad_url": "Address refused (not on kernel.org): {url}",
+      "exists": "The kernel {version} sources are already present",
+      "not_found": "Version {version} was not found on kernel.org",
+      "http": "Server error: {code} {reason}",
+      "network": "Network error: {error}",
+      "incomplete": "Incomplete download",
+      "io": "File error: {error}",
+      "extract": "Extraction failed: {error}",
+      "unexpected_content": "unexpected archive content",
+      "link_not_symlink": "{path} exists and is not a symbolic link: move or delete it",
+      "empty": "kernel.org returned an empty archive. Try again later."
+    }
   }
 }

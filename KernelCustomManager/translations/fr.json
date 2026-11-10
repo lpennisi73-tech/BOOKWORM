@@ -40,10 +40,12 @@
     "reboot_now": "Redémarrer maintenant",
     "yes": "Oui",
     "no": "Non",
-    "replace": "Remplacer"
+    "replace": "Remplacer",
+    "redownload": "Re-télécharger",
+    "use_existing": "Utiliser ces sources"
   },
   "tooltip": {
-    "update_stable": "Mettre à jour vers la dernière version stable"
+    "update_branch": "Rechercher la dernière version de la branche choisie"
   },
   "message": {
     "error": {
@@ -65,7 +67,6 @@
       "remove_failed": "Échec de la suppression:\n{error}",
       "reboot_failed": "Impossible de redémarrer:\n{error}",
       "install_failed": "Erreur d'installation",
-      "stable_version_failed": "Impossible de récupérer la version stable",
       "import_failed": "Échec de l'import",
       "no_config_export": "Aucune configuration à exporter",
       "export_failed": "Échec de l'export",
@@ -75,7 +76,7 @@
       "profile_load_failed": "Impossible de charger le profil",
       "profile_delete_failed": "Impossible de supprimer:\n{error}",
       "select_version": "Veuillez sélectionner une version",
-      "invalid_version": "Version invalide",
+      "invalid_version": "Version invalide\n\nExemples : 7.3.3, 6.18.62, 7.4-rc2",
       "invalid_suffix": "Suffixe invalide : utilisez uniquement des lettres, chiffres et les caractères . _ + ~ - (ex : -kernelcustom)",
       "make_missing": "make est introuvable : installez build-essential (sudo apt install build-essential).",
       "invalid_profile_name": "Le nom « {name} » contient des caractères non autorisés.\n\nCaractères acceptés : lettres, chiffres, espace, point, tiret (-), plus (+) et souligné (_). Le nom doit commencer par une lettre ou un chiffre (64 caractères au maximum).",
@@ -83,13 +84,14 @@
       "auth_cancelled": "Authentification annulée",
       "auth_denied": "Authentification refusée",
       "helper_failed": "Échec (code {code})",
-      "timeout": "Délai dépassé"
+      "timeout": "Délai dépassé",
+      "releases_failed": "Impossible de lire les versions sur kernel.org"
     },
     "confirm": {
       "title": "Confirmer",
       "delete_kernel": "Les paquets suivants seront supprimés :\n\n• {packages}\n\nCette action est irréversible !",
       "reboot": "Voulez-vous vraiment redémarrer le système maintenant ?\n\nAssurez-vous d'avoir sauvegardé votre travail.",
-      "update_available": "Nouvelle version : {version}\n\nTélécharger ?",
+      "update_available": "Nouvelle version {branch} : {version}\n\nTélécharger ?",
       "load_profile": "Charger le profil '{name}' ?\n\nLa configuration actuelle sera remplacée.",
       "delete_profile": "Supprimer le profil '{name}' ?\n\nCette action est irréversible.",
       "clear_history": "Effacer tout l'historique des compilations ?\n\nCette action est irréversible.",
@@ -97,7 +99,9 @@
       "copy_sources": "Copier les sources du kernel {version} dans /usr/src/ ?\n\nCela prendra ~1-2 Go d'espace disque.",
       "delete_sources": "Supprimer les sources du kernel {version} de /usr/src/ ?\n\nCette action est irréversible !",
       "unlink_sources": "Supprimer le lien symbolique pour le kernel {version} de /usr/src/ ?\n\nCela ne supprimera que le lien, pas les sources.",
-      "overwrite_profile": "Le profil « {name} » existe déjà.\n\nLe remplacer par la configuration actuelle ?"
+      "overwrite_profile": "Le profil « {name} » existe déjà.\n\nLe remplacer par la configuration actuelle ?",
+      "sources_exist": "Les sources du kernel {version} sont déjà présentes.\n\nVous pouvez les utiliser telles quelles, ou les re-télécharger : l'arbre est alors remplacé (le .config est conservé, les objets compilés et les modifications sont perdus).",
+      "sources_exist_active": "Les sources du kernel {version} sont déjà présentes et actives.\n\nLes re-télécharger remplace l'arbre : le .config est conservé, les objets compilés et les modifications sont perdus."
     },
     "success": {
       "title": "Succès",
@@ -119,7 +123,8 @@
       "sources_deleted": "Sources du kernel {version} supprimées",
       "packages_installed": "Paquets installés :\n\n• {packages}\n\n🔄 Redémarrez votre système pour utiliser le nouveau kernel.",
       "compilation_success": "Compilation réussie !",
-      "compilation_success_notification": "Kernel {version}{suffix} compilé en {time}"
+      "compilation_success_notification": "Kernel {version}{suffix} compilé en {time}",
+      "sources_activated": "Sources {version} activées"
     },
     "info": {
       "title": "Installation de :",
@@ -259,7 +264,19 @@
     "headers_missing": "Headers linux-headers-{version} introuvables : seuls les liens des sources ont été créés"
   },
   "build": {
-    "version_label": "Version du kernel:"
+    "version_label": "Version du kernel:",
+    "branch_label": "Branche :",
+    "branch": {
+      "stable": "Stable",
+      "mainline": "Mainline",
+      "longterm": "Longterm (LTS)"
+    },
+    "eol": "fin de vie",
+    "releases_loading": "Lecture des versions sur kernel.org…",
+    "releases_unavailable": "kernel.org injoignable : saisissez la version",
+    "hint_prerelease": "Pré-version (mainline) : destinée aux tests. Les modules externes (DKMS, NVIDIA) peuvent ne pas compiler. L'archive n'a pas de somme de contrôle publiée.",
+    "hint_eol": "Cette série est en fin de vie : elle ne reçoit plus de correctifs.",
+    "hint_release": "{branch} · publiée le {date}"
   },
   "drivers": {
     "tab_installation": "Installation",
@@ -691,5 +708,22 @@
     "language": "Langue",
     "about": "À propos",
     "quit": "Quitter"
+  },
+  "download": {
+    "extracting": "Extraction des sources…",
+    "received": "Téléchargement du kernel {version}… {size}",
+    "error": {
+      "bad_url": "Adresse refusée (hors kernel.org) : {url}",
+      "exists": "Les sources du kernel {version} sont déjà présentes",
+      "not_found": "La version {version} est introuvable sur kernel.org",
+      "http": "Erreur du serveur : {code} {reason}",
+      "network": "Erreur réseau : {error}",
+      "incomplete": "Téléchargement incomplet",
+      "io": "Erreur de fichier : {error}",
+      "extract": "Échec de l'extraction : {error}",
+      "unexpected_content": "contenu de l'archive inattendu",
+      "link_not_symlink": "{path} existe et n'est pas un lien symbolique : déplacez-le ou supprimez-le",
+      "empty": "kernel.org a renvoyé une archive vide. Réessayez plus tard."
+    }
   }
 }

@@ -185,6 +185,27 @@ class DialogHelper:
         dialog.present(self.parent)
         return dialog
 
+    def choose(self, title, message, choices, on_choice):
+        """
+        Question à plusieurs réponses. choices = [(id, libellé, style), …] avec
+        style None, "suggested" ou "destructive". Un bouton Annuler est ajouté :
+        on_choice(id) n'est appelé que si une réponse est choisie.
+        """
+        appearances = {"suggested": Adw.ResponseAppearance.SUGGESTED,
+                       "destructive": Adw.ResponseAppearance.DESTRUCTIVE}
+        dialog = Adw.AlertDialog(heading=title, body=_escape(message), body_use_markup=True)
+        dialog.add_response("cancel", get_i18n()._("button.cancel"))
+        for response, label, style in choices:
+            dialog.add_response(response, label)
+            if style in appearances:
+                dialog.set_response_appearance(response, appearances[style])
+                if style == "suggested":
+                    dialog.set_default_response(response)
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda _d, response: response != "cancel" and on_choice(response))
+        dialog.present(self.parent)
+        return dialog
+
     def form(self, title, child, ok_label, on_ok, message="", destructive=False):
         """
         Dialogue avec un formulaire (child). on_ok() est appelé à la validation.
