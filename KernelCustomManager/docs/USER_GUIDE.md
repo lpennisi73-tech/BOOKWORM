@@ -405,10 +405,6 @@ Suffix (optional): [-custom]
   → Example: 6.11.1-custom
   → Leave empty for no suffix
 
-☑ Use fakeroot (recommended)
-  → Builds .deb packages without root privileges
-  → Always recommended unless you have specific reasons
-
 ☑ Sign for SecureBoot
   → Signs the modules with your MOK key before packaging
   → Checked by default when SecureBoot is enabled and a MOK key exists
@@ -442,7 +438,6 @@ The last two options and the distcc hosts are remembered for the next compilatio
 Version: 6.11.1
 Threads: 8
 Suffix: -custom
-Fakeroot: yes
 
 Compilation will start...
 

@@ -100,9 +100,6 @@ def show_compile_dialog(main_window):
     suffix_entry = entry(placeholder=i18n._("dialog.compile.suffix_placeholder"))
     form.append(labeled(i18n._("dialog.compile.suffix"), suffix_entry))
 
-    fakeroot_check = Gtk.CheckButton(label=i18n._("dialog.compile.use_fakeroot"), active=True)
-    form.append(fakeroot_check)
-
     # Signature SecureBoot des modules avant la création des paquets
     sb_manager = main_window.secureboot_manager
     signing_key = find_signing_key(sb_manager)
@@ -157,7 +154,7 @@ def show_compile_dialog(main_window):
         settings.update({"compile.no_debug": no_debug_check.get_active(),
                          "compile.distcc": use_distcc, "compile.distcc_hosts": hosts})
         compile_kernel(main_window, int(threads_spin.get_value()), suffix_entry.get_text().strip(),
-                       fakeroot_check.get_active(), signing_key if secureboot_check.get_active() else None,
+                       signing_key if secureboot_check.get_active() else None,
                        no_debug=no_debug_check.get_active(),
                        distcc_config={"cc": f"distcc {distcc.compiler()}", "hosts": hosts} if use_distcc else None)
 
@@ -165,7 +162,7 @@ def show_compile_dialog(main_window):
                              i18n._("dialog.compile.button_compile"), on_compile)
 
 
-def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None, no_debug=False,
+def compile_kernel(main_window, jobs, suffix, signing_key=None, no_debug=False,
                    distcc_config=None):
     """Lance la compilation dans un terminal"""
     i18n = get_i18n()
@@ -204,7 +201,6 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None, no
         i18n._("compilation.header"),
         i18n._("compilation.threads", count=jobs),
         i18n._("compilation.suffix", suffix=suffix_label),
-        i18n._("compilation.fakeroot", status=(i18n._("compilation.fakeroot_yes") if use_fakeroot else i18n._("compilation.fakeroot_no"))),
     ]
     if sign_config:
         header.append(i18n._("compilation.secureboot_signing", key=sign_config["key"]))
@@ -220,7 +216,6 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None, no
         "linux_dir": str(linux_dir),
         "jobs": jobs,
         "localversion": suffix,
-        "use_fakeroot": use_fakeroot,
         "log_file": str(log_file),
         "repo_dir": str(main_window.kernel_manager.repo_dir),
         "status_file": str(status_file),

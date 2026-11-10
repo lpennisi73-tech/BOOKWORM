@@ -239,7 +239,7 @@ core/build_runner.py (standalone, no application import)
   │  status.json = {"state": "running", "pid": …}
   │  make -jN [LOCALVERSION=…]            (output shown and written to the log)
   │  sign the .ko modules with the MOK key (optional, before packaging)
-  │  [fakeroot] make bindeb-pkg [LOCALVERSION=…]
+  │  make bindeb-pkg [LOCALVERSION=…] [CC=distcc …]
   │  move the .deb files to kernels_repo/
   │  status.json = {"state": "done", "returncode": …, "packages": […]}
   ▼

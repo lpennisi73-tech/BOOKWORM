@@ -9,7 +9,7 @@ de terminal, avec une liste d'arguments (aucun `bash -c`) :
     python3 -I build_runner.py nconfig <linux_dir> <message_fin>
 
 Ce fichier est autonome (aucun import de l'application). Le job JSON contient :
-    linux_dir, jobs, localversion, use_fakeroot, log_file, repo_dir, status_file,
+    linux_dir, jobs, localversion, log_file, repo_dir, status_file,
     sign (null ou {"key": ..., "cert": ...}), messages (textes déjà traduits),
     olddefconfig (true si l'application a modifié le .config),
     distcc (null ou {"cc": "distcc <compilateur>", "hosts": "..."})
@@ -163,7 +163,10 @@ def compile_kernel(job):
 
     # Étape 2 : paquets .deb
     print(f"\n{msg['creating_package']}")
-    cmd = (["fakeroot"] if job["use_fakeroot"] else []) + ["make", "bindeb-pkg"] + make_vars
+    # Pas de « fakeroot make » : bindeb-pkg gère lui-même les droits (Rules-Requires-Root: no,
+    # ou dpkg-buildpackage -rfakeroot sur les anciens kernels). Un fakeroot englobant est
+    # inutile et casse distcc (« libfakeroot internal error: payload not recognized! »)
+    cmd = ["make", f"-j{job['jobs']}", "bindeb-pkg"] + make_vars
     return finish(run_logged(cmd, linux_dir, job["log_file"], append=True))
 
 
