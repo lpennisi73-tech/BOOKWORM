@@ -19,6 +19,7 @@ Utilisation en ligne de commande (lecture seule) :
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -163,6 +164,8 @@ class CleanupManager:
             return name[len("linux-headers-"):] == release
         if name.startswith("linux-"):
             version = name[len("linux-"):]
+            # linux-7.4 et linux-7.4-rc2 donnent les kernels 7.4.0 et 7.4.0-rc2
+            version = re.sub(r'^(\d+\.\d+)(?=-|$)', r'\1.0', version)
             return release == version or release.startswith((version + "-", version + "+"))
         return False
 

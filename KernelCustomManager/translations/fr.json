@@ -723,7 +723,11 @@
       "extract": "Échec de l'extraction : {error}",
       "unexpected_content": "contenu de l'archive inattendu",
       "link_not_symlink": "{path} existe et n'est pas un lien symbolique : déplacez-le ou supprimez-le",
-      "empty": "kernel.org a renvoyé une archive vide. Réessayez plus tard."
-    }
+      "empty": "kernel.org a renvoyé une archive vide. Réessayez plus tard.",
+      "checksum_mismatch": "L'archive ne correspond pas à la somme SHA-256 publiée par kernel.org : elle est corrompue ou a été modifiée. Elle a été supprimée.",
+      "checksum_unavailable": "Impossible de vérifier l'archive : {error}",
+      "checksum_missing": "somme de contrôle absente de sha256sums.asc"
+    },
+    "verifying": "Vérification de l'archive (SHA-256)…"
   }
 }

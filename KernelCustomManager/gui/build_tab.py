@@ -290,12 +290,21 @@ def import_config_dialog(main_window):
     """Importe une configuration"""
     i18n = get_i18n()
 
+    if not (main_window.kernel_manager.base_dir / "linux").is_dir():
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_kernel_source"))
+        return
+
     def on_selected(source):
-        if main_window.kernel_manager.import_config(source):
+        def done(success):
             update_source_label(main_window)
-            main_window.dialogs.toast(i18n._("message.success.config_imported"))
-        else:
-            main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.import_failed"))
+            if success:
+                main_window.dialogs.toast(i18n._("message.success.config_imported"))
+            else:
+                main_window.dialogs.show_error(i18n._("message.error.title"),
+                                               i18n._("message.error.import_failed"))
+
+        # make olddefconfig : dans un thread
+        run_task(lambda: main_window.kernel_manager.import_config(source), done, lambda _e: done(False))
 
     main_window.dialogs.open_file(i18n._("dialog.import_config.title"), on_selected, config_filters())
 

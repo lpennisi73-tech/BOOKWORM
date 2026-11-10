@@ -8,6 +8,7 @@ from gi.repository import Gtk
 
 from core.kernel_manager import is_valid_profile_name
 from gui.widgets import SimpleList, button, button_row, entry, page_box, title_label
+from utils.dialogs import run_task
 from utils.i18n import get_i18n
 
 
@@ -103,11 +104,22 @@ def load_profile(main_window, profiles):
     if profile_name is None:
         return
 
+    if not (main_window.kernel_manager.base_dir / "linux").is_dir():
+        main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_kernel_source"))
+        return
+
     def do_load():
-        if main_window.kernel_manager.load_profile(profile_name):
-            main_window.dialogs.toast(i18n._("message.success.profile_loaded", name=profile_name))
-        else:
-            main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.profile_load_failed"))
+        def done(success):
+            if success:
+                from gui.build_tab import update_source_label
+                update_source_label(main_window)
+                main_window.dialogs.toast(i18n._("message.success.profile_loaded", name=profile_name))
+            else:
+                main_window.dialogs.show_error(i18n._("message.error.title"),
+                                               i18n._("message.error.profile_load_failed"))
+
+        # make olddefconfig : dans un thread
+        run_task(lambda: main_window.kernel_manager.load_profile(profile_name), done, lambda _e: done(False))
 
     main_window.dialogs.ask(i18n._("message.confirm.title"),
                             i18n._("message.confirm.load_profile", name=profile_name), on_yes=do_load)

@@ -162,16 +162,8 @@ class KernelManager:
         
         if not config_path.exists():
             return False
-        
-        shutil.copy(config_path, linux_dir / ".config")
-        
-        subprocess.run(
-            ["make", "olddefconfig"],
-            cwd=str(linux_dir),
-            capture_output=True
-        )
-        
-        return True
+
+        return self._apply_config(config_path)
     
     def get_profiles(self):
         """Liste tous les profils"""
@@ -200,19 +192,29 @@ class KernelManager:
     
     def import_config(self, source):
         """Importe une configuration"""
-        linux_dir = self.base_dir / "linux"
-        
-        if not Path(source).exists():
+        if not Path(source).is_file():
             return False
-        
-        shutil.copy(source, linux_dir / ".config")
-        
-        subprocess.run(
-            ["make", "olddefconfig"],
-            cwd=str(linux_dir),
-            capture_output=True
-        )
-        
+
+        return self._apply_config(source)
+
+    def _apply_config(self, source):
+        """
+        Copie source vers le .config de l'arbre actif puis `make olddefconfig`.
+        False s'il n'y a pas d'arbre actif ou si make échoue (bloquant : à lancer dans un thread)
+        """
+        linux_dir = self.base_dir / "linux"
+        if not linux_dir.is_dir():
+            return False
+        try:
+            shutil.copy(source, linux_dir / ".config")
+            result = subprocess.run(["make", "olddefconfig"], cwd=str(linux_dir),
+                                    capture_output=True, text=True)
+        except OSError as e:  # make absent, fichier illisible…
+            log.warning(f"Unable to apply config {source}: {e}")
+            return False
+        if result.returncode != 0:
+            log.warning(f"make olddefconfig failed ({result.returncode}): {result.stderr.strip()[-500:]}")
+            return False
         return True
     
     def send_notification(self, title, message, urgency="normal"):
@@ -322,7 +324,9 @@ class KernelManager:
 
         try:
             shutil.rmtree(staging, ignore_errors=True)  # reste d'un téléchargement interrompu
-            self._fetch_archive(version, url, archive, report, check)
+            digest = self._fetch_archive(version, url, archive, report, check)
+            self._verify_checksum(url, digest, report)
+            check()
 
             report(None, tr("download.extracting"))
             staging.mkdir(parents=True)
@@ -367,6 +371,7 @@ class KernelManager:
                 if not kernel_releases.is_allowed_url(response.url):
                     raise DownloadError(tr("download.error.bad_url", url=response.url))
                 total = int(response.headers.get("Content-Length") or 0)
+                sha256 = hashlib.sha256()
                 received = 0
                 last_report = 0.0
                 while True:
@@ -375,6 +380,7 @@ class KernelManager:
                     if not block:
                         break
                     out.write(block)
+                    sha256.update(block)
                     received += len(block)
                     now = time.monotonic()
                     if now - last_report >= 0.2:
@@ -391,6 +397,7 @@ class KernelManager:
                     raise DownloadError(tr("download.error.incomplete"))
                 if total:
                     report(1.0)
+                return sha256.hexdigest()
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 raise DownloadError(tr("download.error.not_found", version=version)) from e
@@ -399,6 +406,28 @@ class KernelManager:
             raise DownloadError(tr("download.error.network", error=e.reason)) from e
         except TimeoutError as e:
             raise DownloadError(tr("download.error.network", error=e)) from e
+
+    @staticmethod
+    def _verify_checksum(url, digest, report):
+        """
+        Compare la somme SHA-256 de l'archive à sha256sums.asc de kernel.org (lu en
+        HTTPS, signature PGP non vérifiée). Les pré-versions n'ont pas de somme publiée.
+        """
+        if not kernel_releases.checksums_url(url):
+            log.info(f"No published checksum for {url} (sha256 {digest})")
+            return
+        report(None, tr("download.verifying"))
+        try:
+            expected = kernel_releases.fetch_checksum(url)
+        except OSError as e:
+            raise DownloadError(tr("download.error.checksum_unavailable", error=e)) from e
+        if expected is None:
+            raise DownloadError(tr("download.error.checksum_unavailable",
+                                   error=tr("download.error.checksum_missing")))
+        if expected != digest:
+            log.warning(f"Checksum mismatch for {url}: expected {expected}, got {digest}")
+            raise DownloadError(tr("download.error.checksum_mismatch"))
+        log.info(f"Checksum verified for {url} (sha256 {digest})")
 
     @staticmethod
     def _extract_archive(archive, dest, check):

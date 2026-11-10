@@ -723,7 +723,11 @@
       "extract": "Extraction failed: {error}",
       "unexpected_content": "unexpected archive content",
       "link_not_symlink": "{path} exists and is not a symbolic link: move or delete it",
-      "empty": "kernel.org returned an empty archive. Try again later."
-    }
+      "empty": "kernel.org returned an empty archive. Try again later.",
+      "checksum_mismatch": "The archive does not match the SHA-256 checksum published by kernel.org: it is corrupted or was altered. It has been deleted.",
+      "checksum_unavailable": "Unable to verify the archive: {error}",
+      "checksum_missing": "checksum missing from sha256sums.asc"
+    },
+    "verifying": "Verifying the archive (SHA-256)…"
   }
 }
