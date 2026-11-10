@@ -30,6 +30,7 @@ L'interface est organisée en 9 onglets : **Kernels installés**, **Paquets loca
 - Compilation multi-threadée dans un terminal, en paquets `.deb` (`make bindeb-pkg`), avec notification de fin
 - Option « sans informations de débogage » : compilation plus rapide, pas de paquet `-dbg`
 - Compilation distribuée sur plusieurs machines avec **distcc** (optionnel)
+  - Exemple mesuré : kernel 7.3.4 compilé en paquets `.deb` en **26 minutes**, avec distcc et l'option « sans débogage », sur un Intel Core i7-12700H (12 threads) aidé par une VM Debian 14 sous Proxmox (AMD Ryzen 9 7900X, CPU de type `host`, 20 threads et 8 Go de mémoire alloués à la VM)
 - Gestion des kernels installés (liste, suppression ; le kernel en cours d'exécution est protégé)
 - Installation des paquets `.deb` compilés
 - Profils pour sauvegarder et restaurer des configurations
