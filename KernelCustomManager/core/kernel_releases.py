@@ -10,6 +10,7 @@ bloquants : les lancer dans un thread (run_task).
 import json
 import logging
 import re
+import time
 import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -99,9 +100,18 @@ def fetch_checksum(url, timeout=20):
     sums_url = checksums_url(url)
     if not sums_url:
         return None
-    with urllib.request.urlopen(sums_url, timeout=timeout) as response:
-        text = response.read().decode("ascii", errors="replace")
-    return parse_checksums(text, urlsplit(url).path.rsplit("/", 1)[1])
+    filename = urlsplit(url).path.rsplit("/", 1)[1]
+    # Le CDN peut servir pendant des heures un sha256sums.asc antérieur à la version
+    # (observé le 2026-11-10 avec 7.3.4) : si la somme manque, relire le fichier avec
+    # un paramètre unique, qui contourne le cache
+    for query in ("", f"?t={int(time.time())}"):
+        with urllib.request.urlopen(sums_url + query, timeout=timeout) as response:
+            text = response.read().decode("ascii", errors="replace")
+        checksum = parse_checksums(text, filename)
+        if checksum:
+            return checksum
+        log.info(f"No checksum for {filename} in {sums_url + query}")
+    return None
 
 
 def parse_releases(data):
