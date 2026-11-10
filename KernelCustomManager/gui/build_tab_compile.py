@@ -11,7 +11,9 @@ from datetime import datetime
 
 from gi.repository import GLib, Gtk
 
+from core import distcc
 from gui.widgets import entry, labeled, markup_label
+from utils import settings
 from utils.i18n import get_i18n
 from utils.terminal import launch_in_terminal, build_runner_command
 
@@ -47,6 +49,32 @@ def disable_module_compression(config_file):
         content = content.replace('# CONFIG_MODULE_COMPRESS_NONE is not set', 'CONFIG_MODULE_COMPRESS_NONE=y')
     if content != original:
         config_file.write_text(content)
+
+
+def disable_debug_info(config_file):
+    """
+    Désactive les informations de débogage dans le .config : compilation plus rapide
+    et pas de paquet linux-image-…-dbg. BTF (CONFIG_DEBUG_INFO_BTF) en dépend et
+    disparaît aussi. `make olddefconfig` (build_runner) retire les options dépendantes.
+    """
+    try:
+        original = config_file.read_text()
+    except OSError:
+        return
+    content = re.sub(
+        r'^(CONFIG_DEBUG_INFO(?:_DWARF_TOOLCHAIN_DEFAULT|_DWARF4|_DWARF5|_BTF|_BTF_MODULES)?)=y$',
+        r'# \1 is not set', original, flags=re.MULTILINE)
+    # Kernels >= 5.18 : le niveau de débogage est un choix (NONE / DWARF…)
+    if 'CONFIG_DEBUG_INFO_NONE' not in content:
+        content = content.rstrip('\n') + '\nCONFIG_DEBUG_INFO_NONE=y\n'
+    else:
+        content = content.replace('# CONFIG_DEBUG_INFO_NONE is not set', 'CONFIG_DEBUG_INFO_NONE=y')
+    if content != original:
+        config_file.write_text(content)
+
+
+def _small_hint(text):
+    return markup_label(f"<small><i>{GLib.markup_escape_text(text)}</i></small>")
 
 
 def show_compile_dialog(main_window):
@@ -86,19 +114,59 @@ def show_compile_dialog(main_window):
     else:
         secureboot_check.set_sensitive(False)
         hint = i18n._("dialog.compile.no_signing_key")
-    form.append(markup_label(f"<small><i>{GLib.markup_escape_text(hint)}</i></small>"))
+    form.append(_small_hint(hint))
+
+    # Sans informations de débogage : pas de paquet -dbg
+    no_debug_check = Gtk.CheckButton(label=i18n._("dialog.compile.no_debug"),
+                                     active=settings.get("compile.no_debug", False))
+    form.append(no_debug_check)
+    form.append(_small_hint(i18n._("dialog.compile.no_debug_info")))
+
+    # Compilation distribuée
+    has_distcc = distcc.is_available()
+    distcc_check = Gtk.CheckButton(label=i18n._("dialog.compile.distcc"), sensitive=has_distcc,
+                                   active=has_distcc and settings.get("compile.distcc", False))
+    form.append(distcc_check)
+    hosts_entry = entry(text=settings.get("compile.distcc_hosts", ""), placeholder="localhost/8 192.168.1.20/16")
+    hosts_row = labeled(i18n._("dialog.compile.distcc_hosts"), hosts_entry)
+    form.append(hosts_row)
+    form.append(_small_hint(i18n._("dialog.compile.distcc_info", compiler=distcc.compiler())
+                            if has_distcc else i18n._("dialog.compile.distcc_missing")))
+
+    def on_distcc_changed(*_args):
+        """Avec distcc, le nombre de tâches est celui de l'ensemble des machines"""
+        active = distcc_check.get_active()
+        hosts_row.set_sensitive(active)
+        threads_spin.set_range(1, max(cpus * 2, 512) if active else cpus * 2)
+        jobs = distcc.suggested_jobs(hosts_entry.get_text()) if active else 0
+        threads_spin.set_value(jobs or cpus)
+
+    distcc_check.connect("toggled", on_distcc_changed)
+    hosts_entry.connect("changed", on_distcc_changed)
+    on_distcc_changed()
 
     form.append(markup_label(f"<i>{i18n._('dialog.compile.estimated_time')}</i>"))
 
     def on_compile():
+        use_distcc = distcc_check.get_active()
+        hosts = " ".join(hosts_entry.get_text().split())
+        if use_distcc and not distcc.is_valid_hosts(hosts):
+            main_window.dialogs.show_error(i18n._("message.error.title"),
+                                           i18n._("message.error.invalid_distcc_hosts"))
+            return
+        settings.update({"compile.no_debug": no_debug_check.get_active(),
+                         "compile.distcc": use_distcc, "compile.distcc_hosts": hosts})
         compile_kernel(main_window, int(threads_spin.get_value()), suffix_entry.get_text().strip(),
-                       fakeroot_check.get_active(), signing_key if secureboot_check.get_active() else None)
+                       fakeroot_check.get_active(), signing_key if secureboot_check.get_active() else None,
+                       no_debug=no_debug_check.get_active(),
+                       distcc_config={"cc": f"distcc {distcc.compiler()}", "hosts": hosts} if use_distcc else None)
 
     main_window.dialogs.form(i18n._("dialog.compile.title"), form,
                              i18n._("dialog.compile.button_compile"), on_compile)
 
 
-def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
+def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None, no_debug=False,
+                   distcc_config=None):
     """Lance la compilation dans un terminal"""
     i18n = get_i18n()
     linux_dir = main_window.kernel_manager.base_dir / "linux"
@@ -123,6 +191,8 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
     # par Debian) doit alors être désactivée. Sans signature, le .config n'est pas touché.
     if signing_key:
         disable_module_compression(linux_dir / ".config")
+    if no_debug:
+        disable_debug_info(linux_dir / ".config")
 
     # Signature SecureBoot des modules AVANT bindeb-pkg (ils restent en .ko)
     sign_config = None
@@ -138,6 +208,11 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
     ]
     if sign_config:
         header.append(i18n._("compilation.secureboot_signing", key=sign_config["key"]))
+    if no_debug:
+        header.append(i18n._("compilation.no_debug"))
+    if distcc_config:
+        header.append(i18n._("compilation.distcc", compiler=distcc_config["cc"],
+                             hosts=distcc_config["hosts"] or i18n._("compilation.distcc_default_hosts")))
     header += ["", i18n._("compilation.starting")]
 
     status_file = log_file.with_suffix(".status.json")
@@ -150,6 +225,8 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
         "repo_dir": str(main_window.kernel_manager.repo_dir),
         "status_file": str(status_file),
         "sign": sign_config,
+        "olddefconfig": bool(signing_key or no_debug),
+        "distcc": distcc_config,
         "messages": {
             "header": header,
             "compiling_modules": i18n._("compilation.compiling_modules"),
@@ -164,6 +241,7 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
             "sign_failed": i18n._("secureboot.failed_to_sign"),
             "signed_with_errors": i18n._("secureboot.modules_signed_with_errors"),
             "all_signed": i18n._("secureboot.all_modules_signed"),
+            "distcc_plugins": i18n._("compilation.distcc_plugins"),
         },
     }
     main_window.kernel_manager.log_dir.mkdir(parents=True, exist_ok=True)

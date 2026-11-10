@@ -28,6 +28,8 @@ L'interface est organisée en 9 onglets : **Kernels installés**, **Paquets loca
 - Vérification SHA-256 des archives stable et longterm (`sha256sums.asc` de kernel.org)
 - Configuration à partir de la config du système ou d'un fichier, puis `make nconfig` (optionnel)
 - Compilation multi-threadée dans un terminal, en paquets `.deb` (`make bindeb-pkg`), avec notification de fin
+- Option « sans informations de débogage » : compilation plus rapide, pas de paquet `-dbg`
+- Compilation distribuée sur plusieurs machines avec **distcc** (optionnel)
 - Gestion des kernels installés (liste, suppression ; le kernel en cours d'exécution est protégé)
 - Installation des paquets `.deb` compilés
 - Profils pour sauvegarder et restaurer des configurations

@@ -10,7 +10,9 @@ de terminal, avec une liste d'arguments (aucun `bash -c`) :
 
 Ce fichier est autonome (aucun import de l'application). Le job JSON contient :
     linux_dir, jobs, localversion, use_fakeroot, log_file, repo_dir, status_file,
-    sign (null ou {"key": ..., "cert": ...}), messages (textes déjà traduits)
+    sign (null ou {"key": ..., "cert": ...}), messages (textes déjà traduits),
+    olddefconfig (true si l'application a modifié le .config),
+    distcc (null ou {"cc": "distcc <compilateur>", "hosts": "..."})
 
 Le fichier status_file permet à l'application de suivre la compilation,
 même quand le terminal rend la main immédiatement (gnome-terminal) :
@@ -95,11 +97,25 @@ def sign_modules(linux_dir, key, cert, msg):
     return True
 
 
+def config_enabled(linux_dir, option):
+    try:
+        return f"\n{option}=y\n" in Path(linux_dir, ".config").read_text(errors="replace")
+    except OSError:
+        return False
+
+
 def compile_kernel(job):
     msg = job["messages"]
     linux_dir = job["linux_dir"]
     status_file = job["status_file"]
     make_vars = [f"LOCALVERSION={job['localversion']}"] if job["localversion"] else []
+
+    # distcc : même CC pour les deux étapes, sinon bindeb-pkg recompilerait tout
+    distcc = job.get("distcc")
+    if distcc:
+        make_vars.append(f"CC={distcc['cc']}")
+        if distcc.get("hosts"):
+            os.environ["DISTCC_HOSTS"] = distcc["hosts"]
 
     write_status(status_file, state="running", pid=os.getpid())
     for line in msg["header"]:
@@ -122,9 +138,21 @@ def compile_kernel(job):
         wait_enter(msg["press_enter"])
         return returncode
 
+    if distcc and config_enabled(linux_dir, "CONFIG_GCC_PLUGINS"):
+        print(f"⚠️  {msg['distcc_plugins']}")
+
+    # Étape 0 : le .config a été modifié par l'application. make le remet en cohérence
+    # ici, sinon la compilation poserait des questions dans le terminal
+    append = False
+    if job.get("olddefconfig"):
+        code = run_logged(["make", "olddefconfig"] + make_vars, linux_dir, job["log_file"], append)
+        if code != 0:
+            return finish(code)
+        append = True
+
     # Étape 1 : compilation
     print(f"\n{msg['compiling_modules']}")
-    code = run_logged(["make", f"-j{job['jobs']}"] + make_vars, linux_dir, job["log_file"], append=False)
+    code = run_logged(["make", f"-j{job['jobs']}"] + make_vars, linux_dir, job["log_file"], append)
     if code != 0:
         return finish(code)
 

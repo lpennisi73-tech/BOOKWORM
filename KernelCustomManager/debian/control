@@ -43,7 +43,8 @@ Recommends: dkms,
             mokutil,
             sbsigntool,
             shim-signed,
-Suggests: firmware-amd-graphics,
+Suggests: distcc,
+          firmware-amd-graphics,
 Description: build, sign and install custom Linux kernels
  KernelCustom Manager is a GTK4/libadwaita application for Debian that
  makes custom kernels easy:

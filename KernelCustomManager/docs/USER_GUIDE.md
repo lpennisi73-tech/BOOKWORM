@@ -414,12 +414,27 @@ Suffix (optional): [-custom]
   → Checked by default when SecureBoot is enabled and a MOK key exists
   → See the SecureBoot section: vmlinuz must also be signed after installation
 
+☐ Without debug information (no -dbg package)
+  → Much faster build, smaller packages, no linux-image-…-dbg package
+  → Changes the .config: debug information is turned off, and so is BTF
+    (CONFIG_DEBUG_INFO_BTF), which some eBPF tools need
+
+☐ Distributed build (distcc)
+  → Spreads the compilation over several machines (package: distcc)
+  → distcc hosts: e.g. "localhost/8 192.168.1.20/16" (name/maximum jobs).
+    Empty = hosts from the distcc configuration (~/.distcc/hosts, /etc/distcc/hosts)
+  → Every machine must run distccd, allow your address, and have the same
+    compiler (the dialog shows its name, e.g. x86_64-linux-gnu-gcc-16)
+  → Threads then counts the jobs of all machines together
+
 Estimated time: 30-90 minutes
 ```
 
 4. Click **"🔨 Compile"**
 5. Terminal window opens showing compilation progress
 6. Wait for compilation to complete (grab a coffee!): a desktop notification tells you when it is done
+
+The last two options and the distcc hosts are remembered for the next compilation.
 
 **Compilation output:**
 ```

@@ -85,7 +85,8 @@
       "auth_denied": "Authentification refusée",
       "helper_failed": "Échec (code {code})",
       "timeout": "Délai dépassé",
-      "releases_failed": "Impossible de lire les versions sur kernel.org"
+      "releases_failed": "Impossible de lire les versions sur kernel.org",
+      "invalid_distcc_hosts": "Liste d'hôtes distcc invalide\n\nExemple : localhost/8 192.168.1.20/16"
     },
     "confirm": {
       "title": "Confirmer",
@@ -173,7 +174,13 @@
       "secureboot_info": "Les modules seront signés automatiquement avant la création du .deb",
       "estimated_time": "Durée estimée: 30-90 minutes",
       "button_compile": "🔨 Compiler",
-      "no_signing_key": "Aucune clé MOK : générez-en une dans l'onglet SecureBoot pour signer les modules à la compilation."
+      "no_signing_key": "Aucune clé MOK : générez-en une dans l'onglet SecureBoot pour signer les modules à la compilation.",
+      "no_debug": "Sans informations de débogage (pas de paquet -dbg)",
+      "no_debug_info": "Compilation nettement plus rapide et paquets plus légers. Modifie le .config : désactive aussi BTF (CONFIG_DEBUG_INFO_BTF), utilisé par certains outils eBPF.",
+      "distcc": "Compilation distribuée (distcc)",
+      "distcc_hosts": "Hôtes distcc :",
+      "distcc_info": "Vide : hôtes de la configuration de distcc (~/.distcc/hosts, /etc/distcc/hosts). Chaque machine doit avoir distccd et le compilateur {compiler}. Le nombre de threads est celui de toutes les machines.",
+      "distcc_missing": "distcc n'est pas installé (sudo apt install distcc)."
     },
     "import_config": {
       "title": "Importer une configuration",
@@ -229,7 +236,11 @@
     "return_code": "Code retour: {code}",
     "press_enter": "Appuyez sur Entrée pour fermer...",
     "failed_notification": "Erreur lors de la compilation du kernel {version}{suffix}",
-    "secureboot_signing": "Signature SecureBoot des modules : oui (avant bindeb-pkg, clé {key})"
+    "secureboot_signing": "Signature SecureBoot des modules : oui (avant bindeb-pkg, clé {key})",
+    "no_debug": "Débogage: sans (pas de paquet -dbg)",
+    "distcc": "Distcc: {compiler} · hôtes: {hosts}",
+    "distcc_default_hosts": "configuration de distcc",
+    "distcc_plugins": "CONFIG_GCC_PLUGINS est activé : les fichiers compilés avec un plugin GCC ne peuvent pas être distribués et seront compilés localement."
   },
   "profiles": {
     "title": "Profils de configuration",

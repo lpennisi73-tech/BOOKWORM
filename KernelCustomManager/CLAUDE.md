@@ -74,6 +74,10 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - Suivi de fin : le runner écrit `<log>.status.json` (`running` + pid, puis `done` + returncode + paquets) et l'app le surveille (`_wait_for_status`). Le code de retour du terminal ne sert pas, car gnome-terminal rend la main immédiatement.
 - Le suffixe `LOCALVERSION` est validé (`^[A-Za-z0-9._+~-]+$`) et passé comme argument de `make`, jamais interprété par un shell.
 - `tar` (extraction des sources) et `make` restent des outils système appelés avec des listes d'arguments.
+- **Sans débogage** (`disable_debug_info`) : met `CONFIG_DEBUG_INFO_NONE=y` et retire DWARF et BTF du `.config`. Résultat : pas de paquet `linux-image-…-dbg`. Décoché par défaut, car BTF disparaît.
+- Quand l'app modifie le `.config` (signature ou sans débogage), le job porte `olddefconfig: true` et le runner lance `make olddefconfig` avant la compilation. Sans cela, `make` poserait des questions dans le terminal.
+- **distcc** (`core/distcc.py`) : `make CC="distcc <triplet>-gcc-<N>"` (nom versionné, pour avoir le même GCC sur toutes les machines), hôtes dans `DISTCC_HOSTS` (variable d'environnement, jamais de shell). **`CC` est passé aux deux étapes** (`make` puis `bindeb-pkg`), sinon tout serait recompilé. La case est grisée si `distcc` n'est pas installé (paquet en `Suggests`). Avec `CONFIG_GCC_PLUGINS=y`, le runner prévient que ces fichiers restent compilés localement.
+- Préférences : `utils/settings.py` (`config_dir()/settings.json`, clés pointées : `compile.no_debug`, `compile.distcc`, `compile.distcc_hosts`), `get(clé, défaut)` / `update({…})`.
 
 ## Nettoyage (étape 6)
 
@@ -103,7 +107,7 @@ Application Python de gestion de kernels Linux personnalisés : compilation, paq
 - **Ne jamais lancer `dh_python3` sur `/usr/libexec`** : il réécrit le shebang des helpers root et **supprime `-I`**.
 - `kernelcustom_manager.py` est exécutable dans le dépôt, mais remis en 0644 dans le paquet (`override_dh_fixperms`), car il est importé par le lanceur.
 - `Depends` : outils de compilation du kernel (`build-essential`, `bc`, `bison`, `flex`, `libssl-dev`, `libelf-dev`, `libdw-dev`, `libncurses-dev`, `fakeroot`, `dpkg-dev`, `rsync`, `cpio`, `kmod`, `pahole` car Debian active `CONFIG_DEBUG_INFO_BTF`, `xz-utils`), plus `debhelper`, `openssl`, `pciutils`, `pkexec`, `polkitd`, `ptyxis | x-terminal-emulator`, GTK4 et libadwaita. **`debhelper` est vraiment nécessaire** : le `debian/rules` généré par `make bindeb-pkg` appelle `dh_*` (override lintian `binary-package-depends-on-toolchain-package`).
-- `Recommends` : dkms, mokutil, sbsigntool, shim-signed. `Suggests` : firmware-amd-graphics (non-free-firmware).
+- `Recommends` : dkms, mokutil, sbsigntool, shim-signed. `Suggests` : distcc, firmware-amd-graphics (non-free-firmware).
 - `prerm` (remove) : annule une installation NVIDIA programmée (`kernelcustom-nvidia-installer cancel`), sinon le service appellerait au démarrage un helper supprimé. `postrm` (purge) : supprime `/var/lib/kernelcustom-manager`. **Les données utilisateur (`~/.local/share/kernelcustom-manager`) ne sont jamais touchées.**
 - Aucun fichier écrit dans le `$HOME` à l'installation.
 - Construction : `dpkg-buildpackage -us -uc -b` depuis `KernelCustomManager/`. Les `.deb`, `.buildinfo` et `.changes` sont écrits dans `/usr/src/BOOKWORM/`, et ignorés par le `.gitignore` racine.

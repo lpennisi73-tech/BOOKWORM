@@ -50,6 +50,7 @@ KernelCustomManager/
 ├── core/                        # Business logic, no GTK
 │   ├── kernel_manager.py        # Kernels, packages, profiles, configs, history, download
 │   ├── kernel_releases.py       # Versions published on kernel.org (stable, mainline, longterm)
+│   ├── distcc.py                # distcc: compiler name, host list, job count
 │   ├── build_runner.py          # Standalone script run in a terminal (compile, nconfig)
 │   ├── sources_manager.py       # /usr/src sources and headers
 │   ├── driver_manager.py        # GPU detection and drivers (Debian repositories, NVIDIA .run)
@@ -65,6 +66,7 @@ KernelCustomManager/
 │   ├── paths.py                 # All paths, XDG data, legacy data migration
 │   ├── dialogs.py               # DialogHelper, ProgressDialog, run_task
 │   ├── i18n.py                  # Translations
+│   ├── settings.py              # User preferences (settings.json)
 │   ├── pkexec_helper.py         # PkexecHelper: the only caller of pkexec
 │   └── terminal.py              # launch_in_terminal(), build_runner_command()
 ├── helpers/

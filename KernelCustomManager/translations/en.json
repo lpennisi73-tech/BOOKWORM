@@ -85,7 +85,8 @@
       "auth_denied": "Authentication denied",
       "helper_failed": "Failed (code {code})",
       "timeout": "Timed out",
-      "releases_failed": "Unable to read the versions from kernel.org"
+      "releases_failed": "Unable to read the versions from kernel.org",
+      "invalid_distcc_hosts": "Invalid distcc host list\n\nExample: localhost/8 192.168.1.20/16"
     },
     "confirm": {
       "title": "Confirm",
@@ -173,7 +174,13 @@
       "secureboot_info": "Modules will be automatically signed before creating the .deb",
       "estimated_time": "Estimated time: 30-90 minutes",
       "button_compile": "🔨 Compile",
-      "no_signing_key": "No MOK key: generate one in the SecureBoot tab to sign modules at build time."
+      "no_signing_key": "No MOK key: generate one in the SecureBoot tab to sign modules at build time.",
+      "no_debug": "Without debug information (no -dbg package)",
+      "no_debug_info": "Much faster build and smaller packages. Changes the .config: also disables BTF (CONFIG_DEBUG_INFO_BTF), used by some eBPF tools.",
+      "distcc": "Distributed build (distcc)",
+      "distcc_hosts": "distcc hosts:",
+      "distcc_info": "Empty: hosts from the distcc configuration (~/.distcc/hosts, /etc/distcc/hosts). Every machine needs distccd and the {compiler} compiler. The number of threads is the total for all machines.",
+      "distcc_missing": "distcc is not installed (sudo apt install distcc)."
     },
     "import_config": {
       "title": "Import Configuration",
@@ -229,7 +236,11 @@
     "return_code": "Return code: {code}",
     "press_enter": "Press Enter to close...",
     "failed_notification": "Error during kernel {version}{suffix} compilation",
-    "secureboot_signing": "SecureBoot module signing: yes (before bindeb-pkg, key {key})"
+    "secureboot_signing": "SecureBoot module signing: yes (before bindeb-pkg, key {key})",
+    "no_debug": "Debug info: none (no -dbg package)",
+    "distcc": "Distcc: {compiler} · hosts: {hosts}",
+    "distcc_default_hosts": "distcc configuration",
+    "distcc_plugins": "CONFIG_GCC_PLUGINS is enabled: files built with a GCC plugin cannot be distributed and will be compiled locally."
   },
   "profiles": {
     "title": "Configuration Profiles",
