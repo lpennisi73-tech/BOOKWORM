@@ -268,6 +268,26 @@ class KernelManager:
         tree = self.sources_dir / f"linux-{version}"
         return tree if tree.is_dir() else None
 
+    def tree_version(self, linux_dir=None):
+        """
+        Version du kernel d'un arbre de sources (défaut : l'arbre actif), lue dans son
+        Makefile : 7.3.3, ou 7.4.0-rc2 pour linux-7.4-rc2. À défaut, le nom du dossier.
+        """
+        linux_dir = Path(linux_dir) if linux_dir else self.base_dir / "linux"
+        try:
+            values = dict(re.findall(r'^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)[ \t]*=[ \t]*(\S*)[ \t]*$',
+                                     (linux_dir / "Makefile").read_text(errors="replace")[:4096],
+                                     flags=re.MULTILINE))
+            if values.get("VERSION") and values.get("PATCHLEVEL"):
+                return (f"{values['VERSION']}.{values['PATCHLEVEL']}.{values.get('SUBLEVEL') or 0}"
+                        f"{values.get('EXTRAVERSION', '')}")
+        except OSError:
+            pass
+        try:
+            return linux_dir.resolve().name.removeprefix("linux-") or "unknown"
+        except OSError:
+            return "unknown"
+
     def active_version(self):
         """Version de l'arbre actif (cible du lien linux), None s'il n'y en a pas"""
         link = self.base_dir / "linux"

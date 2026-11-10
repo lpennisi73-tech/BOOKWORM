@@ -318,7 +318,7 @@ def export_config_dialog(main_window):
         main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.no_config_export"))
         return
 
-    version = linux_dir.resolve().name.replace("linux-", "")
+    version = main_window.kernel_manager.tree_version()
     default_name = f"kernel-config-{version}.config"
 
     def on_selected(destination):

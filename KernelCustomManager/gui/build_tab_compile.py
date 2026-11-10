@@ -28,6 +28,27 @@ def find_signing_key(sb_manager):
     return None
 
 
+def disable_module_compression(config_file):
+    """
+    Désactive la compression des modules dans le .config : les signatures posées
+    avant bindeb-pkg restent valides. make reprend les valeurs au prochain lancement
+    (les options inconnues de cette version du kernel sont ignorées).
+    """
+    try:
+        original = config_file.read_text()
+    except OSError:
+        return
+    content = re.sub(r'^(CONFIG_MODULE_COMPRESS(?:_ALL|_XZ|_GZIP|_ZSTD)?)=y$', r'# \1 is not set',
+                     original, flags=re.MULTILINE)
+    # Kernels où la compression est un choix (NONE / GZIP / XZ / ZSTD)
+    if 'CONFIG_MODULE_COMPRESS_NONE' not in content:
+        content = content.rstrip('\n') + '\nCONFIG_MODULE_COMPRESS_NONE=y\n'
+    else:
+        content = content.replace('# CONFIG_MODULE_COMPRESS_NONE is not set', 'CONFIG_MODULE_COMPRESS_NONE=y')
+    if content != original:
+        config_file.write_text(content)
+
+
 def show_compile_dialog(main_window):
     """Dialogue de compilation"""
     i18n = get_i18n()
@@ -87,10 +108,8 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
         main_window.dialogs.show_error(i18n._("message.error.title"), i18n._("message.error.invalid_suffix"))
         return
 
-    try:
-        kernel_version = linux_dir.resolve().name.replace("linux-", "")
-    except Exception:
-        kernel_version = "unknown"
+    # Version réelle du kernel (7.4.0-rc2 pour linux-7.4-rc2) : historique et sauvegardes
+    kernel_version = main_window.kernel_manager.tree_version()
 
     # Sauvegarder la config
     main_window.kernel_manager.backup_config(kernel_version, suffix)
@@ -98,56 +117,14 @@ def compile_kernel(main_window, jobs, suffix, use_fakeroot, signing_key=None):
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_file = main_window.kernel_manager.log_dir / f"compile-{timestamp}.log"
 
-
     start_time = datetime.now()
 
-    # Debian active CONFIG_MODULE_COMPRESS_XZ : on désactive la compression des modules
-    # dans le .config pour que les signatures SecureBoot posées avant bindeb-pkg restent valides
-    config_file = linux_dir / ".config"
-    if config_file.exists():
-        # Lire le fichier .config
-        with open(config_file, 'r') as f:
-            config_content = f.read()
+    # Les modules sont signés dans l'arbre, avant bindeb-pkg : la compression (activée
+    # par Debian) doit alors être désactivée. Sans signature, le .config n'est pas touché.
+    if signing_key:
+        disable_module_compression(linux_dir / ".config")
 
-        # Désactiver toutes les options de compression des modules
-        config_modified = False
-
-        # Désactiver CONFIG_MODULE_COMPRESS (option principale)
-        if 'CONFIG_MODULE_COMPRESS=y' in config_content:
-            config_content = config_content.replace('CONFIG_MODULE_COMPRESS=y', '# CONFIG_MODULE_COMPRESS is not set')
-            config_modified = True
-
-        # Désactiver CONFIG_MODULE_COMPRESS_ALL
-        if 'CONFIG_MODULE_COMPRESS_ALL=y' in config_content:
-            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ALL=y', '# CONFIG_MODULE_COMPRESS_ALL is not set')
-            config_modified = True
-
-        # Désactiver les algorithmes de compression spécifiques
-        if 'CONFIG_MODULE_COMPRESS_XZ=y' in config_content:
-            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_XZ=y', '# CONFIG_MODULE_COMPRESS_XZ is not set')
-            config_modified = True
-        if 'CONFIG_MODULE_COMPRESS_GZIP=y' in config_content:
-            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_GZIP=y', '# CONFIG_MODULE_COMPRESS_GZIP is not set')
-            config_modified = True
-        if 'CONFIG_MODULE_COMPRESS_ZSTD=y' in config_content:
-            config_content = config_content.replace('CONFIG_MODULE_COMPRESS_ZSTD=y', '# CONFIG_MODULE_COMPRESS_ZSTD is not set')
-            config_modified = True
-
-        # Ajouter CONFIG_MODULE_COMPRESS_NONE=y si pas présent
-        if 'CONFIG_MODULE_COMPRESS_NONE' not in config_content:
-            config_content += '\nCONFIG_MODULE_COMPRESS_NONE=y\n'
-            config_modified = True
-        elif 'CONFIG_MODULE_COMPRESS_NONE is not set' in config_content:
-            config_content = config_content.replace('# CONFIG_MODULE_COMPRESS_NONE is not set', 'CONFIG_MODULE_COMPRESS_NONE=y')
-            config_modified = True
-
-        # Sauvegarder le .config modifié
-        if config_modified:
-            with open(config_file, 'w') as f:
-                f.write(config_content)
-
-    # Signature SecureBoot des modules AVANT bindeb-pkg (CONFIG_MODULE_COMPRESS_NONE=y
-    # garantit que les modules restent en .ko)
+    # Signature SecureBoot des modules AVANT bindeb-pkg (ils restent en .ko)
     sign_config = None
     if signing_key:
         sign_config = {"key": str(signing_key[0]), "cert": str(signing_key[1])}
