@@ -1,3 +1,25 @@
+kernelcustom-manager (3.1) unstable; urgency=medium
+
+  * Choix de la branche du kernel : stable, mainline (pré-versions -rc) et
+    longterm, lus sur kernel.org. Le bouton de mise à jour suit la branche.
+  * Téléchargement des sources réécrit : annulable à tout moment, limité aux
+    serveurs de kernel.org, vérification SHA-256 des archives stable et
+    longterm, plus d'arbre incomplet après un échec.
+  * Sources déjà présentes : choix entre les utiliser et les re-télécharger.
+  * Compilation distribuée avec distcc (Suggests: distcc).
+  * Option de compilation sans débogage : compilation plus rapide, pas
+    de paquet -dbg.
+  * Plus de fakeroot autour de « make bindeb-pkg » : il était inutile et
+    provoquait une erreur libfakeroot avec distcc.
+  * La compression des modules n'est plus désactivée dans le .config quand
+    la signature à la compilation n'est pas demandée.
+  * Corrections : lien « linux » cassé, import de configuration et
+    chargement de profil sans sources, version réelle du kernel dans
+    l'historique, protection des sources du kernel en cours au nettoyage.
+  * Nouvelles dépendances : zstd, ca-certificates.
+
+ -- Kenny-Tech <contact@bookworm-mon0.org>  Tue, 10 Nov 2026 21:09:04 +0100
+
 kernelcustom-manager (3.0.1) unstable; urgency=medium
 
   * Traductions : plus aucun message en dur dans core/ et utils/.

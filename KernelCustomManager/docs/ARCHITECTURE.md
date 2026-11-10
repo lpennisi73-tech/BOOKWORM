@@ -1,6 +1,6 @@
 # KernelCustom Manager - Architecture
 
-Technical documentation for KernelCustom Manager **v3.0**: how the code is organized, how the
+Technical documentation for KernelCustom Manager **v3.1**: how the code is organized, how the
 privileged operations are secured, and how the main workflows (compilation, SecureBoot, cleanup)
 work.
 

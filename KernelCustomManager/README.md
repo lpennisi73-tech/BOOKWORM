@@ -1,6 +1,6 @@
-# 🚀 KernelCustom Manager v3.0.1
+# 🚀 KernelCustom Manager v3.1
 
-[![Version](https://img.shields.io/badge/version-3.0.1-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
+[![Version](https://img.shields.io/badge/version-3.1-blue.svg)](https://github.com/lpennisi73-tech/BOOKWORM.git)
 [![Debian](https://img.shields.io/badge/Debian-14%20forky-a80030.svg)](https://www.debian.org/)
 [![Python](https://img.shields.io/badge/python-3-green.svg)](https://www.python.org/)
 [![GTK](https://img.shields.io/badge/GTK-4%20%2B%20libadwaita-orange.svg)](https://www.gtk.org/)
@@ -510,6 +510,14 @@ Avec l'aide de **Claude AI** (Anthropic) pour :
 ---
 
 ## 📅 Historique des Versions
+
+### v3.1 (2026-11-10) - Branches du kernel et distcc 🌿
+- 🌿 **Choix de la branche** : stable, mainline (`-rc`) et longterm, lus sur kernel.org
+- 🔐 Vérification SHA-256 des sources (stable et longterm), téléchargement annulable et limité à kernel.org
+- 🖧 **Compilation distribuée avec distcc** (optionnel)
+- ⚡ Option « sans informations de débogage » : compilation plus rapide, pas de paquet `-dbg`
+- 🐛 Plus de `fakeroot` autour de `make bindeb-pkg` (erreur libfakeroot avec distcc), lien `linux` cassé, import de config sans sources
+- 📦 Nouvelles dépendances : `zstd`, `ca-certificates`
 
 ### v3.0.1 (2026-11-01) - Traductions 🌍
 - 🌍 Tous les messages des pilotes GPU, de SecureBoot, du nettoyage et des sources sont traduits (FR/EN)

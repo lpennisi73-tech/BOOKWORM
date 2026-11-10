@@ -1,6 +1,6 @@
 # KernelCustom Manager - User Guide
 
-Complete guide for using KernelCustom Manager v3.0
+Complete guide for using KernelCustom Manager v3.1
 
 ## Table of Contents
 - [Getting Started](#getting-started)
